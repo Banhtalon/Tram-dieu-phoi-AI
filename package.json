@@ -1,0 +1,17 @@
+{
+  "name": "moc-coffee-pos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "workflow:help": "node scripts/workflow.mjs help",
+    "workflow:init": "node scripts/workflow.mjs init",
+    "workflow:freeze": "node scripts/workflow.mjs freeze",
+    "workflow:verify": "node scripts/workflow.mjs verify",
+    "workflow:status": "node scripts/workflow.mjs status",
+    "workflow:report": "node scripts/bridge.mjs report"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

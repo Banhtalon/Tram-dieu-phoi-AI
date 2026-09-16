@@ -1,0 +1,261 @@
+# QQ AI Workflow v10 — canonical local contract
+Version 10.1.0-rc.2 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Scope: one Owner, local personal projects, subscription access. Not a production
+or adversarial agent isolation framework. CLI connection is a separate stage.
+
+## Authority and scope
+Explicit Owner intent > this spec > agreed task contract > project profile >
+task/evidence > agent suggestions. Changes to product scope require Owner input.
+Lead may choose implementation details and strengthen tests without Owner involvement.
+Any contract change starts a new revision, records why, invalidates evidence/review;
+never silently weaken gates. A task uses one workflow version throughout a revision.
+Legacy v9 rules apply only to explicitly unconverted host tasks.
+
+## Document hierarchy
+This specification is the sole source of workflow rules. Supporting documents may
+describe commands, file formats, recovery steps or Owner-facing examples, but cannot
+add, remove or reinterpret workflow rules. When a supporting guide appears to add a
+rule, the documentation checker reports it as an advisory; revise this specification
+in a new task revision before treating that guidance as a rule.
+
+## Responsibilities
+Owner: describe behavior, decide product tradeoffs, account-only actions,
+functional acceptance, final merge approval. No code, logs, SQL or CI judgment.
+LEAD: single contact; reads current files/state, plans briefly, classifies risk,
+chooses implementer, operates tools, may code, collects evidence, coordinates repair.
+IMPLEMENTER: one bounded feature; no self-approval, no scope/gate changes.
+REVIEWER: fresh independent session, not involved in any implementation of the
+feature (including its design); assess contract, diff, tests and risk against exact head and contract hash.
+Different provider preferred; a fresh separate session on the same model is allowed
+when competent. Identity is recorded, not authenticated by this local kit.
+
+## Execution identity vocabulary
+Workflow responsibility and execution identity are separate concepts and must not be
+collapsed in packets or Owner reports:
+- **role**: workflow responsibility such as `worker`, `senior`, `reviewer` or `elevated_reviewer`.
+- **provider**: account/service family used by the CLI, such as `google` or `openai`.
+- **CLI**: executable interface actually invoked, such as `antigravity` (`agy`) or `codex`.
+- **requested_model**: model ID selected by the frozen bridge/configuration before invocation.
+- **observed_models**: model IDs actually reported by the provider/CLI during the invocation.
+- **session_id**: provider/CLI session identity returned by the invocation when available.
+- **usage**: provider-reported counters, or `null` when unavailable.
+
+Owner-facing reporting must distinguish requested identity from observed identity and
+must never infer an observed model from a configuration value. A CLI name is not a
+model name, and a provider name is not a role.
+
+## Per-feature loop
+1. Read host task state; protect uncommitted work. Create one feature branch/checkpoint.
+2. Write a short contract: behavior, exclusions, base SHA, acceptance criteria, gates,
+   user_visible and risk/complexity. Freeze before implementation.
+3. Use one writer. Lead works or hands off via shared files and available tools.
+4. Run relevant checks during development. No mandatory full suite for every tiny edit.
+5. At feature completion, commit code, inspect actual diff, run agreed final gates.
+6. Reviewer checks that head. Material issues go directly to implementer.
+7. Rerun affected checks; refresh final evidence and review for the final head.
+8. Present a local build with 1–3 ordinary user actions for small changes, more when
+   needed to cover the behavior. Record Owner acceptance from the Lead chat.
+9. Completion requires evidence, independent PASS, and acceptance if user-visible.
+   Merge/publish remains a separate explicitly authorized action.
+
+## Small-project execution and reporting
+For new work, group related changes into one small, independently acceptable
+feature. Under the existing eligible Google-worker route, the worker handles
+implementation, relevant tests and bounded repairs. Lead checks the decisive
+source before freezing scope, risk and gates; worker reconnaissance is advisory.
+Lead intervenes at completion, a blocker, a budget boundary or a decision request,
+rather than repeatedly requesting progress. This adds no routing policy, changes
+no model binding, and does not make elevated work automatically worker-eligible.
+
+During implementation run affected tests; at completion run the agreed final
+gates. After repair refresh affected checks and final-head evidence/review. Never
+select gates by filename alone, weaken a frozen gate set, or reuse old-head PASS.
+Host projects need their own agreed tests, not this kit's internal test suite.
+
+A reportable checkpoint is `DONE`, `READY_FOR_OWNER`, `BLOCKED_TECHNICAL`,
+`WAITING_QUOTA` or `WAITING_CAPABILITY`. Once one is persisted, Lead must generate
+its current Owner report and present it in the Owner chat. A report-generation
+failure blocks an Owner-facing completion claim, while leaving the persisted
+checkpoint unchanged. The same reporting requirement applies to ASSISTED work;
+when no bridge receipt exists, the Lead report identifies that absence rather than
+inventing execution data.
+
+For `bridge.mjs pilot`, `run` and `resume`, the read-only report is generated
+automatically after a reportable checkpoint. Its single JSON response adds
+`reports.owner_markdown` for Owner delivery and `reports.lead` for technical
+coordination. This derived step calls no provider and writes no packet or receipt.
+Running and repair statuses have no automatic report. If report generation fails,
+the CLI returns the core status JSON with a redacted `report_error` and a non-zero
+exit code; it does not rewrite the saved checkpoint.
+
+The read-only bridge report is a derived, redacted summary, not a verifier,
+acceptance record or activation proof. Owner output describes progress, blockers
+and the next product action in plain language, including who acts next. Outside
+the automatic bridge result, Sol/Lead runs the deterministic report command and
+presents the Owner version; Owner is not expected to run the CLI or inspect
+packets. Lead output adds packet references, counters and provider-reported usage.
+Each formatted Owner or Lead report is bounded to 8 KiB UTF-8, including its
+truncation notice and references. Omitted detail must be disclosed; blockers
+cannot silently disappear. Missing usage remains unavailable, not zero, and bytes
+are not token or subscription-quota measurements. Requested model and observed
+model remain distinct. Full source and gate evidence remain available and mandatory
+for review under the existing contract.
+
+Resume uses the existing checkpoint and preflight. An uncertain in-flight action
+requires reconciliation, not automatic replay. A summary of saved work does not
+promise native provider-session memory restoration. Existing frozen tasks,
+repair budgets, FAST eligibility, Product Check, independent review, Owner
+acceptance and merge/publish authorization remain unchanged.
+
+## Routing and budgets
+Risk LOW/ELEVATED is potential harm; complexity SIMPLE/COMPLEX is reasoning effort.
+Auth, permissions, migrations, data destruction, privacy, credential handling or
+deployment changes elevate risk even if one line. Lead inspects content and behavior;
+path heuristics alone cannot certify safety. Risk cannot decrease within a revision.
+Simple low-risk work: configured fast implementer on the configured Google worker route.
+Complex or elevated work: configured senior-capable agent; independent competent
+reviewer. Model IDs/effort must be discovered and tested on the Owner's account.
+These defaults remain in force for existing frozen tasks. A new contract may opt
+into `execution.policy=GEMINI_FIRST_V1`. The literal policy name is retained for v10
+schema compatibility; it means the configured Google worker is preferred and does not
+imply use of the legacy Gemini CLI. Its `prepared`, `local_synthetic`, `rationale`,
+`design_sessions` and `browser_required` fields are frozen with it.
+Lead inspects actual code before setting prepared; it means the implementation
+approach, scope and checks are settled. Prepared work uses the worker by default,
+including complex work; elevated work additionally requires local synthetic data.
+Unprepared complex/elevated work uses senior. Elevated tasks in this policy require
+an explicitly configured elevated reviewer, never a silent ordinary-review fallback.
+Google-worker bridge configurations include that reviewer even for initially LOW
+tasks so later risk elevation does not require changing the checkpoint configuration.
+Google-worker review records bind effective risk, reviewer tier and the configured
+reviewer binding digest. Risk elevation needs a fresh elevated review even at the
+same head. Cached readiness is revalidated; material findings go to bounded repair,
+not to another approval attempt without implementation repair.
+Tasks adopting versioned schema `qq.workflow.task.v10.1` may declare
+`execution.policy=CONTROLLED_DELEGATION_V1` or `execution.policy=CONTROLLED_DELEGATION_V2`.
+This policy family is subscription-only.
+The V1 policy uses a designated Gemini 3.8 Flash High worker, an independent Terra Xhigh ordinary
+reviewer, and exactly `gpt-6-astra` at low effort for senior escalation or elevated
+review. Astra never escalates to Astra; an unavailable elevated reviewer returns
+WAIT/STOP and never falls back to Terra.
+The V2 policy preserves verification quality while conserving Codex tokens: it uses Sol Medium as
+Lead, Gemini 3.8 Flash High as primary survey/implementation/test/repair worker, GPT-5.6 Luna Max
+as standby fallback worker, GPT-5.6 Terra Xhigh as independent ordinary reviewer, GPT-5.6 Sol Medium
+as senior, and a fresh independent GPT-5.6 Sol Medium session as elevated reviewer. Lead and senior
+participants cannot serve as reviewer for that feature. Model IDs and reasoning effort are verified
+via CLI and cannot be substituted silently. V2 allocates one initial worker attempt plus four shared
+repair rounds between Gemini and Luna. Fallback from Gemini to Luna is permitted exclusively on
+invocation or provider execution failures (unavailability, quota, connection, timeout, or invalid protocol
+output); test failures and reviewer repair requests never trigger fallback. Scope violations,
+permission denials, contract mismatches, or tampered evidence cannot trigger fallback and fail closed
+with STOP/BLOCKED. Pre-handoff reconciliation verifies Gemini has terminated, reconciles workspace state,
+and records a durable checkpoint before invoking Luna; Luna runs sequentially without parallel execution
+and remains active worker for subsequent rounds. Failed invocations do not consume completed repair rounds
+and are recorded in failed call history. If Luna is unavailable, WAIT/BLOCKED is recorded without falling
+back to senior or paid APIs. Luna capabilities are probed only when fallback is needed. If material failure
+persists after four repair rounds, Sol senior has at most two passes (one initial pass and one follow-up
+repair pass); tasks starting at senior also have at most two senior passes without worker budget. Budget
+exhaustion with unresolved issues stops with BLOCKED_TECHNICAL.
+The shipped new-task template and `workflow.mjs init` use `CONTROLLED_DELEGATION_V1`.
+`GEMINI_FIRST_V1` remains supported for legacy task compatibility rather than as the
+default for newly initialized tasks.
+The controlled lanes are FAST, NORMAL and ELEVATED_PROCESS; risk remains LOW or
+ELEVATED. FAST is documentation-only with a frozen allowlist and a bound waiver;
+out-of-scope or behavioral content stops with SCOPE_VIOLATION. User-visible tasks
+need a frozen local Product Check; unavailable Product Check is UNVERIFIED/WAIT and
+does not consume implementation repair budget. Controlled repair budgets are tracked
+by origin and policy and never reset by a new scope revision; supplemental recovery requires
+explicit Owner authorization and a dedicated budget ledger.
+For every controlled invocation, the Bridge writes an assignment receipt before
+invocation and an execution receipt on every terminal path. Raw invocation identity
+is authoritative; candidate custody references its chain root, receipt ID and hash.
+Missing provider metadata stays null or unavailable; matching fields that conflict
+fail closed. A valid later chain append does not invalidate an earlier receipt.
+Design participants cannot review that feature. Lead may obtain at most one senior
+design consultation before freezing the contract and records its session identity;
+consultation does not reset or extend implementation repair budgets. Missing design
+decisions after that consultation are a technical blocker or a product question.
+The intended execution profile is a capable Lead, configured Google fast worker,
+configured senior, ordinary reviewer and independent elevated reviewer. Exact CLI IDs,
+model IDs and effort require capability probes; product names are preferences, not
+evidence of capability.
+Two repair rounds at the initial tier, then at most one senior implementation pass.
+Any unresolved material failure after that => BLOCKED_TECHNICAL, preserved checkpoint.
+A reviewer finding causes repair, not a debate loop. A new scope revision must not
+be invented to reset the budget. Quota/auth failure pauses, never counts as success,
+never triggers paid API fallback. Switching eligible providers preserves counters.
+Reviewer runs have no recursive delegation. Default one concurrent writer.
+
+## State and evidence
+Local JSON packets are the working state; GitHub records meaningful milestones only.
+Contract digest detects accidental edits; it is not a secure external authority store.
+Verification records base/head/hash, actual argv, exit codes, timeouts and redacted
+output. A process exit 0 alone is not product acceptance. Review and Owner acceptance
+bind to the same head/hash. A later edit invalidates them.
+An elevated-risk review records completed risk checks and their result in its summary.
+Fresh-context review is organizational independence, not OS-level isolation.
+For Google-worker-first user-visible tasks with browser_required, readiness also requires
+ui_evidence containing matching head/contract hash, a localhost URL, PASS status
+and nonempty checks with action, observed result and passed=true. Missing evidence
+is WAITING_CAPABILITY, not a repair request or Owner acceptance. Lead verifies the
+running build and records actual browser observations; JSON alone is not proof.
+Owner sees the local link, short steps and status in Lead chat, never a requirement
+to inspect code/SQL/logs. UI changes invalidate old UI evidence with the head.
+Usage records retain provider-reported counters or null when unavailable; API price
+does not establish subscription quota. Full redacted gate evidence remains available.
+The packet checker cannot prove a human/model identity, detect fabricated JSON,
+or enforce all transitions. Lead must retain genuine execution/review records.
+For source inspection, Lead may predeclare exact test-file paths and SHA-256
+content approvals for personally inspected synthetic test data in bridge config.
+Their JSON digest is frozen as execution.source_approvals_sha256 in the task and
+checked against the config before work. The checkpoint also binds configuration;
+changed bytes invalidate them. No directory-wide secret exemption is supported.
+Recognizable credential formats and current secret environment values remain blocked
+even with an approval. Runtime output and argument redaction remain unchanged.
+Review packets persist the exact inspected source, base/head content hashes,
+declared context and gate sources alongside the source digest. Missing required
+source context or oversized packets stop review. Technical review may pass before
+browser evidence exists; that absence alone is a readiness wait, not a code defect.
+Readiness and activation recheck persisted bridge source against its recorded
+digest and task/configuration bindings. New tasks can freeze
+execution.review_source_required=true to reject reviews without this source proof.
+Provider result fields cannot override Lead-recorded identities or evidence bindings.
+
+## Machine Fast Lane
+Fast Lane only routes a clean documentation-only candidate; it never replaces the
+Feature flow. The accepted base commit supplies the allowlist and classifier. The
+allowlist contains only `docs/user-guide/**/*.md` and `docs/tutorials/**/*.md`.
+Any changed allowlist, classifier, fixture, `AGENTS.md`, `GEMINI.md`, binary file,
+symlink, executable-mode change or other path goes to Feature flow. A rename checks
+both its old and new paths. Comment-only recognition is not supported.
+Each decision binds the base and head plus hashes of the accepted allowlist and
+classifier. Changed base, head or decision, unavailable accepted base, or an unclean
+checkout invalidates the decision and routes to Feature flow. A candidate cannot
+relax its own controls and receive Fast Lane.
+
+## Safety and operational boundaries
+Keep credentials in official account stores; never copy them into task files.
+Run gates only from a trusted local project. Tools are not a sandbox.
+Local auth/database code may be implemented/tested with synthetic data and elevated
+review. Existing live writes, migration execution, deletion and publishing restrictions
+remain in force. Confirm exact target and existing authorization before external writes.
+Owner approves intent/consequences, never technical waivers. If safe resolution is
+unavailable, stop with a plain-language blocker and keep the working version.
+No hosted, production, or live acceptance claim from local tests.
+
+## Stage boundary
+ASSISTED is the default. Lead can execute locally and use already available
+independent sessions/tools; missing capability is WAITING_CAPABILITY.
+The sequential CLI bridge can run explicit supervised pilots while ASSISTED.
+LOCAL_AUTO requires installation, actual account/model probes and a successful
+handoff/repair pilot on Windows. Merely editing a config field is insufficient.
+Activation evidence binds the tested bridge source, account bindings and pilot state.
+The accepted pilot uses both actual subscription providers, a fresh review, a
+reviewer-or-gate repair and final evidence. Before activation, the Lead runs the
+ deterministic quota drill against that accepted pilot. The drill exercises the same
+preflight handling: it records `WAITING_QUOTA`, keeps the checkpoint unchanged, and
+requires a fresh safe preflight before work could continue. It does not call a
+provider or prove a provider's live quota-error wording; a later natural quota event
+is additional operational evidence, not an activation prerequisite. The CLI bridge
+documents commands and persisted checkpoints; it does not change these conditions.
+See [CLI operations](CLI_BRIDGE.md) for commands and conservative interruption recovery.

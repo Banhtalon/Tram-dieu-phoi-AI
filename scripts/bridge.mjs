@@ -1,0 +1,38 @@
+import path from 'node:path';
+import {readJson} from './lib/workflow.mjs';
+import {inspect,runBridge,quotaDrill,activate} from './lib/bridge.mjs';
+import {redactText} from './lib/redact.mjs';
+import {attachCheckpointReports,buildReport,formatReport} from './lib/report.mjs';
+
+const [command,...args]=process.argv.slice(2);
+const controller=new AbortController();
+process.on('SIGINT',()=>controller.abort());process.on('SIGTERM',()=>controller.abort());
+try {
+  let result,packetDir;
+  if(command==='report') {
+    const [dir,...flags]=args;
+    if(!dir)throw Error('Usage: bridge.mjs report <packets> [--audience owner|lead] [--format json|md]');
+    const option=name=>{const index=flags.indexOf(name);return index>=0?flags[index+1]:undefined;};
+    const audience=option('--audience')??'owner',format=option('--format')??'md';
+    const known=new Set(['--audience','--format']);for(let index=0;index<flags.length;index+=2)if(!known.has(flags[index])||flags[index+1]===undefined)throw Error('Usage: bridge.mjs report <packets> [--audience owner|lead] [--format json|md]');
+    const report=await buildReport(path.resolve(dir),{audience});
+    process.stdout.write(formatReport(report,{format}));
+    process.exitCode=0;
+  } else if(command==='doctor') {
+    const [config,cwd,dir,...flags]=args;
+    result=await inspect(path.resolve(cwd),await readJson(config),path.resolve(dir),flags.includes('--probe'),controller.signal);
+  } else if(['pilot','run','resume'].includes(command)) {
+    const [config,task,cwd,dir]=args;
+    packetDir=dir;
+    result=await runBridge({config:await readJson(config),taskPath:task,cwd,packetDir,pilot:command==='pilot'||(command==='resume'&&args.includes('--pilot')),resume:command==='resume',signal:controller.signal});
+  } else if(command==='quota-drill')result=await quotaDrill(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
+  else if(command==='activate')result=await activate(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
+  else if(command==='status')result=await readJson(path.join(args[0],'state.json'));
+  else throw Error('Usage: bridge.mjs doctor <config> <repo> <packets> [--probe] | pilot/run/resume <config> <task> <repo> <packets> [--pilot] | quota-drill <config> <accepted-pilot-packets> <activation-packets> | activate <config> <accepted-pilot-packets> <activation-packets> | status <packets> | report <packets> [--audience owner|lead] [--format json|md]');
+  if(command!=='report'){
+    const summary={status:result.status,head:result.head,repair_rounds:result.repair_rounds,senior_passes:result.senior_passes,reconciliation_required:result.reconciliation_required};
+    const output=['pilot','run','resume'].includes(command)?await attachCheckpointReports(summary,packetDir):{result:summary,reportFailed:false};
+    console.log(JSON.stringify(output.result,null,2));
+    process.exitCode=output.reportFailed?1:['ACCEPTED','PROBED','READY_FOR_OWNER','DONE','QUOTA_DRILL_PASS'].includes(result.status)?0:1;
+  }
+} catch(error){console.error(redactText(error.message));process.exitCode=1;}
