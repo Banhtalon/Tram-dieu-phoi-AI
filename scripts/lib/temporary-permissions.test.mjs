@@ -100,26 +100,54 @@ test('requires an explicit settings path', async t => {
   );
 });
 
-test('preserves an unrelated settings change made while the callback runs', async t => {
+test('reports an ambiguous recreated temporary rule without removing it', async t => {
+  const f = await fixture({ permissions: { allow: [], deny: [] } });
+  t.after(() => rm(f.root, { recursive: true, force: true }));
+  const rule = `write_file(${path.resolve(f.target)})`;
+
+  await assert.rejects(
+    () => withTemporaryWritePermissions({
+      settingsPath: f.settingsPath,
+      workspaceRoot: f.workspaceRoot,
+      files: [f.target]
+    }, async () => {
+      const current = JSON.parse(await readFile(f.settingsPath, 'utf8'));
+      current.marker = 'concurrent-change';
+      current.permissions.allow = [rule];
+      await writeFile(f.settingsPath, JSON.stringify(current, null, 2) + '\n');
+    }),
+    error => error?.code === 'CONTROL_STATE_MUTATED'
+  );
+
+  const final = JSON.parse(await readFile(f.settingsPath, 'utf8'));
+  assert.equal(final.marker, 'concurrent-change');
+  assert.deepEqual(final.permissions.allow, [rule]);
+});
+
+test('stops safely and preserves concurrent settings changes when temporary ownership is ambiguous', async t => {
   const existingRule = 'read_file(C:/fixture/existing.txt)';
   const concurrentRule = 'write_file(C:/fixture/concurrent.txt)';
   const f = await fixture({ permissions: { allow: [existingRule], deny: [] }, marker: 'original' });
   t.after(() => rm(f.root, { recursive: true, force: true }));
 
-  await withTemporaryWritePermissions({
-    settingsPath: f.settingsPath,
-    workspaceRoot: f.workspaceRoot,
-    files: [f.target]
-  }, async () => {
-    const current = JSON.parse(await readFile(f.settingsPath, 'utf8'));
-    current.marker = 'concurrent-change';
-    current.permissions.allow.push(concurrentRule);
-    await writeFile(f.settingsPath, JSON.stringify(current, null, 2) + '\n');
-  });
+  const rule = `write_file(${path.resolve(f.target)})`;
+  await assert.rejects(
+    () => withTemporaryWritePermissions({
+      settingsPath: f.settingsPath,
+      workspaceRoot: f.workspaceRoot,
+      files: [f.target]
+    }, async () => {
+      const current = JSON.parse(await readFile(f.settingsPath, 'utf8'));
+      current.marker = 'concurrent-change';
+      current.permissions.allow.push(concurrentRule);
+      await writeFile(f.settingsPath, JSON.stringify(current, null, 2) + '\n');
+    }),
+    error => error?.code === 'CONTROL_STATE_MUTATED'
+  );
 
   const final = JSON.parse(await readFile(f.settingsPath, 'utf8'));
   assert.equal(final.marker, 'concurrent-change');
-  assert.deepEqual(final.permissions.allow, [existingRule, concurrentRule]);
+  assert.deepEqual(final.permissions.allow, [existingRule, rule, concurrentRule]);
 });
 
 test('cleans up when the callback reports a timeout-like failure', async t => {

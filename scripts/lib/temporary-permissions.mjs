@@ -116,22 +116,9 @@ async function removeTemporaryRules(snapshot, grantedBytes, addedRules) {
     return;
   }
 
-  const allow = [...current.settings.permissions.allow];
-  let removed = false;
-  for (const rule of addedRules) {
-    const index = allow.indexOf(rule);
-    if (index >= 0) {
-      allow.splice(index, 1);
-      removed = true;
-    }
+  if (addedRules.some(rule => current.settings.permissions.allow.includes(rule))) {
+    throw error('CONTROL_STATE_MUTATED', 'settings changed while temporary permission ownership could not be verified');
   }
-  if (!removed) return;
-  const cleaned = {
-    ...current.settings,
-    permissions: { ...current.settings.permissions, allow }
-  };
-  try { await writeFile(snapshot.path, encodeSettings(cleaned, current.bom)); }
-  catch (cause) { throw error('CONTROL_STATE_MUTATED', 'temporary permission cleanup could not update settings safely', { cause }); }
 }
 
 export async function withTemporaryWritePermissions({ settingsPath, workspaceRoot, files } = {}, callback) {
@@ -163,6 +150,8 @@ export async function withTemporaryWritePermissions({ settingsPath, workspaceRoo
     callbackError = cause;
     throw cause;
   } finally {
+    // Forced termination skips finally; callers must reconcile settings and verify
+    // no temporary permission remains before reusing the workspace.
     try {
       await removeTemporaryRules(snapshot, grantedBytes, addedRules);
     } catch (cleanupError) {
