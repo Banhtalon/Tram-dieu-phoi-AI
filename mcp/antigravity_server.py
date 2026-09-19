@@ -20,8 +20,11 @@ logger = logging.getLogger("antigravity-worker")
 mcp = MCPServer("antigravity-worker")
 
 TASK_ID = re.compile(r"^TASK-[A-Z0-9_-]+$", re.IGNORECASE)
+TRIAL_MODEL = "gemini-3.8-flash-high"
 MAX_PROMPT_CHARS = 32_000
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+MAX_EVIDENCE_BYTES = 32 * 1024
+MAX_EVIDENCE_EVENTS = 64
 
 
 @dataclass
@@ -106,8 +109,13 @@ def _empty_result(
         "timed_out": False,
         "output_limited": False,
         "conversation_id": None,
+        "requested_model": None,
         "observed_model": None,
         "observed_agent": None,
+        "permission_mode": None,
+        "sandbox": None,
+        "evidence_source": "antigravity.stdout.stream-json",
+        "evidence_truncated": False,
         "started_at": timestamp,
         "finished_at": timestamp,
         "command": [],
@@ -155,6 +163,50 @@ def _skip_permissions() -> bool:
     raise ValueError("ANTIGRAVITY_SKIP_PERMISSIONS must be true or false")
 
 
+def _local_trial_mode() -> bool:
+    raw = os.environ.get("ANTIGRAVITY_LOCAL_TRIAL", "false").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"", "0", "false", "no", "off"}:
+        return False
+    raise ValueError("ANTIGRAVITY_LOCAL_TRIAL must be true or false")
+
+
+def _trial_model() -> str:
+    model = os.environ.get("ANTIGRAVITY_MODEL", "").strip()
+    if model != TRIAL_MODEL:
+        raise ValueError(f"ANTIGRAVITY_MODEL must be {TRIAL_MODEL}")
+    return model
+
+
+def _overlaps(left: Path, right: Path) -> bool:
+    try:
+        left.relative_to(right)
+        return True
+    except ValueError:
+        pass
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        return False
+
+
+def _trial_root(raw: str, name: str) -> Path:
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        raise ValueError(f"{name} must be an absolute path")
+    if root.is_symlink() or getattr(root, "is_junction", lambda: False)():
+        raise ValueError(f"{name} must not be a symlink or junction")
+    try:
+        root = root.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"{name} does not exist") from exc
+    if not root.is_dir():
+        raise ValueError(f"{name} must be a directory")
+    return root
+
+
 def _test_fixture_mode() -> bool:
     """Allow only the local fake CLI used by unit tests.
 
@@ -173,12 +225,23 @@ def resolve_workspace(task_id: str) -> Path:
     configured_root = os.environ.get("WORKTREE_ROOT", "").strip()
     if not configured_root:
         raise ValueError("WORKTREE_ROOT is not configured")
-    root = Path(configured_root).expanduser()
-    if not root.is_absolute():
-        root = Path.cwd() / root
-    root = root.resolve(strict=False)
-    if not root.is_dir():
-        raise FileNotFoundError("WORKTREE_ROOT does not exist or is not a directory")
+    if _local_trial_mode():
+        root = _trial_root(configured_root, "WORKTREE_ROOT")
+        repo_raw = os.environ.get("ANTIGRAVITY_REPO_ROOT", "").strip()
+        control_raw = os.environ.get("ANTIGRAVITY_CONTROL_ROOT", "").strip()
+        if not repo_raw or not control_raw:
+            raise ValueError("local trial repository and control roots are required")
+        repo_root = _trial_root(repo_raw, "ANTIGRAVITY_REPO_ROOT")
+        control_root = _trial_root(control_raw, "ANTIGRAVITY_CONTROL_ROOT")
+        if _overlaps(root, repo_root) or _overlaps(root, control_root):
+            raise ValueError("local trial root must be outside the repository and control roots")
+    else:
+        root = Path(configured_root).expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        root = root.resolve(strict=False)
+        if not root.is_dir():
+            raise FileNotFoundError("WORKTREE_ROOT does not exist or is not a directory")
     candidate = root / task_id
     if candidate.is_symlink() or getattr(candidate, "is_junction", lambda: False)():
         raise ValueError("task worktree cannot be a symlink or junction")
@@ -202,11 +265,54 @@ def _antigravity_executable() -> str:
     return executable
 
 
-def _worker_prompt(task_id: str, request: str) -> str:
+def _iter_view_file_absolute_paths(value: Any):
+    if not isinstance(value, dict) or value.get("event") != "step_update":
+        return
+    step = value.get("step_update")
+    if not isinstance(step, dict) or step.get("step_type") != "tool" or step.get("tool_name") != "view_file":
+        return
+    tool_info = step.get("tool_info")
+    parameters = tool_info.get("parameters") if isinstance(tool_info, dict) else None
+    yield parameters.get("AbsolutePath") if isinstance(parameters, dict) else None
+
+
+def _canonical_view_file_path(raw_path: Any, workspace: Path) -> Path | None:
+    if not isinstance(raw_path, str):
+        return None
+    text = raw_path.strip()
+    if not text or text.startswith(("\\\\", "//")) or any(part == ".." for part in re.split(r"[\\/]+", text)):
+        return None
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        return None
+    try:
+        lexical = Path(os.path.abspath(text))
+        canonical = candidate.resolve(strict=False)
+        if os.path.normcase(str(lexical)) != os.path.normcase(str(canonical)):
+            return None
+        canonical.relative_to(workspace.resolve(strict=True))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return canonical
+
+
+def _view_file_scope_violation(events: list[Any], workspace: Path) -> str | None:
+    for event in events:
+        for raw_path in _iter_view_file_absolute_paths(event):
+            if _canonical_view_file_path(raw_path, workspace) is None:
+                return "view_file AbsolutePath is not a canonical path inside the resolved workspace"
+    return None
+
+
+def _worker_prompt(task_id: str, workspace: Path, request: str) -> str:
+    resolved_workspace = workspace.resolve(strict=True)
     return f"""You are the implementation worker for task {task_id}.
 
 Hard boundaries:
-- Work only in the current task worktree.
+- The only workspace is this absolute path: {resolved_workspace}
+- Use that exact absolute path for every file operation; do not guess, derive, or try another path.
+- If a required file is missing there, report the missing file and stop.
+- For view_file, AbsolutePath must be a canonical path inside that workspace.
 - You may edit implementation files and run relevant tests in this worktree.
 - Never modify ai-control.desired_state, workflow packets, leases, receipts, checkpoints, or Harness control state.
 - Never claim or approve a task, resume the Harness, change routing, commit, reset, clean, merge, publish, or deploy.
@@ -218,19 +324,33 @@ Implementation request:
 Report only actions and checks actually performed."""
 
 
-def _command(executable: str, prompt: str, conversation_id: str | None, skip_permissions: bool) -> list[str]:
+def _command(
+    executable: str,
+    prompt: str,
+    conversation_id: str | None,
+    skip_permissions: bool,
+    *,
+    local_trial: bool = False,
+    model: str | None = None,
+    timeout: float | None = None,
+) -> list[str]:
     command = [executable]
-    if skip_permissions:
+    if local_trial:
+        if not model or timeout is None:
+            raise ValueError("local trial command metadata is incomplete")
+        command.extend(["--model", model, "--sandbox", "--mode", "accept-edits", "--output-format", "stream-json", "--print-timeout", f"{timeout:g}s"])
+    elif skip_permissions:
         command.append("--dangerously-skip-permissions")
-    command.extend(["-p", prompt])
+    command.extend(["--print", prompt])
     if conversation_id:
         command.extend(["--conversation", conversation_id])
-    command.extend(["--output-format", "stream-json"])
+    if not local_trial:
+        command.extend(["--output-format", "stream-json"])
     return command
 
 
 def _display_command(command: list[str]) -> list[str]:
-    return ["<prompt>" if index > 0 and command[index - 1] in {"-p", "--prompt"} else value for index, value in enumerate(command)]
+    return ["<prompt>" if index > 0 and command[index - 1] in {"-p", "--prompt", "--print"} else value for index, value in enumerate(command)]
 
 
 async def _read_limited(stream: asyncio.StreamReader, overflow: asyncio.Event) -> str:
@@ -323,12 +443,61 @@ def _conversation_id(events: list[Any]) -> str | None:
     return None
 
 
-def _metadata(events: list[Any]) -> tuple[str | None, str | None]:
+def _metadata(events: list[Any]) -> tuple[str | None, str | None, str | None, bool | None]:
     for event in events:
         if isinstance(event, dict) and event.get("event") == "init" and isinstance(event.get("init"), dict):
             init = event["init"]
-            return init.get("model") if isinstance(init.get("model"), str) else None, init.get("agent") if isinstance(init.get("agent"), str) else None
-    return None, None
+            return (
+                init.get("model") if isinstance(init.get("model"), str) else None,
+                init.get("agent") if isinstance(init.get("agent"), str) else None,
+                init.get("permission_mode") if isinstance(init.get("permission_mode"), str) else None,
+                init.get("sandbox") if isinstance(init.get("sandbox"), bool) else None,
+            )
+    return None, None, None, None
+
+
+def _trial_metadata_error(observed_model: str | None, permission_mode: str | None, sandbox: bool | None) -> str | None:
+    if observed_model != TRIAL_MODEL:
+        return f"Antigravity reported model {observed_model or '<missing>'}, expected {TRIAL_MODEL}"
+    if isinstance(permission_mode, str) and permission_mode.strip().lower() == "always-proceed":
+        return "Antigravity explicitly reported always-proceed permissions"
+    if sandbox is False:
+        return "Antigravity explicitly reported sandbox=false"
+    return None
+
+
+def _redact_nested(value: Any, depth: int = 0) -> Any:
+    if depth >= 6:
+        return "<evidence-depth-limit>"
+    if isinstance(value, str):
+        return _redact(value)
+    if isinstance(value, list):
+        return [_redact_nested(item, depth + 1) for item in value[:MAX_EVIDENCE_EVENTS]]
+    if isinstance(value, dict):
+        return {
+            _redact(str(key)): _redact_nested(item, depth + 1)
+            for key, item in list(value.items())[:MAX_EVIDENCE_EVENTS]
+        }
+    return value
+
+
+def _bounded_evidence(events: list[Any]) -> tuple[list[Any], bool]:
+    safe_events = [_redact_nested(event) for event in events[:MAX_EVIDENCE_EVENTS]]
+    encoded = json.dumps(safe_events, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) <= MAX_EVIDENCE_BYTES:
+        return safe_events, len(events) > MAX_EVIDENCE_EVENTS
+    event_types = [
+        event.get("event")
+        for event in events[:MAX_EVIDENCE_EVENTS]
+        if isinstance(event, dict) and isinstance(event.get("event"), str)
+    ]
+    return [{
+        "event": "evidence_summary",
+        "source": "antigravity.stdout.stream-json",
+        "event_count": len(events),
+        "event_types": event_types[:MAX_EVIDENCE_EVENTS],
+        "truncated": True,
+    }], True
 
 
 def _terminal_result(events: list[Any]) -> dict[str, Any] | None:
@@ -369,27 +538,45 @@ def _protocol_errors(events: list[Any], parse_error: bool, conversation_id: str 
 
 async def _execute(task_id: str, operation_id: str, invocation_kind: str, attempt: int, rework_count: int, request: str, conversation_id: str | None) -> dict[str, Any]:
     workspace = resolve_workspace(task_id)
-    if not _test_fixture_mode():
+    local_trial = _local_trial_mode()
+    fixture_mode = _test_fixture_mode()
+    if local_trial and fixture_mode:
+        return _error(task_id, "CONFIG_MISMATCH", "test_mode and local trial cannot be enabled together", workspace, operation_id, invocation_kind, attempt, rework_count)
+    if not local_trial and not fixture_mode:
         return _error(task_id, "WORKER_ISOLATION_UNAVAILABLE", "Antigravity worker isolation is not verified", workspace, operation_id, invocation_kind, attempt, rework_count)
+    try:
+        skip_permissions = _skip_permissions()
+        requested_model = _trial_model() if local_trial else None
+        if local_trial and skip_permissions:
+            return _error(task_id, "CONFIG_MISMATCH", "local trial refuses skip_permissions", workspace, operation_id, invocation_kind, attempt, rework_count)
+    except ValueError as exc:
+        return _error(task_id, "CONFIG_MISMATCH", str(exc), workspace, operation_id, invocation_kind, attempt, rework_count)
     executable = _antigravity_executable()
     timeout = _configured_timeout()
-    command = _command(executable, _worker_prompt(task_id, request), conversation_id, _skip_permissions())
+    command = _command(executable, _worker_prompt(task_id, workspace, request), conversation_id, skip_permissions, local_trial=local_trial, model=requested_model, timeout=timeout)
     logger.info("antigravity start task_id=%s operation_id=%s kind=%s cwd=%s resumed=%s timeout=%ss", task_id, operation_id, invocation_kind, workspace, bool(conversation_id), timeout)
     started_at = _now()
     raw = await _run(command, workspace, timeout)
     finished_at = _now()
     events, parse_error = _events(raw["stdout"])
     observed_conversation = _conversation_id(events) or conversation_id
-    observed_model, observed_agent = _metadata(events)
+    observed_model, observed_agent, permission_mode, sandbox = _metadata(events)
+    scope_violation = _view_file_scope_violation(events, workspace)
+    evidence_events, evidence_truncated = _bounded_evidence(events)
     terminal = _terminal_result(events)
     agent_status = terminal.get("status") if terminal and isinstance(terminal.get("status"), str) else None
     protocol_errors = _protocol_errors(events, parse_error, observed_conversation, terminal)
-    if raw["timed_out"]:
+    if scope_violation:
+        status = "TIMED_OUT" if raw["timed_out"] else "OUTPUT_LIMIT" if raw["output_limited"] else "FAILED"
+        error, error_code = scope_violation, "WORKER_SCOPE_VIOLATION"
+    elif raw["timed_out"]:
         status, error, error_code = "TIMED_OUT", "Antigravity CLI timed out", "WORKER_TIMEOUT"
     elif raw["output_limited"]:
         status, error, error_code = "OUTPUT_LIMIT", "Antigravity CLI output exceeded the configured limit", "WORKER_OUTPUT_LIMIT"
     elif raw["spawn_error"] or raw["exit_code"] != 0 or protocol_errors:
         status, error, error_code = "FAILED", raw["spawn_error"] or "Antigravity stream-json protocol error: " + "; ".join(protocol_errors), "MCP_PROTOCOL_ERROR"
+    elif local_trial and (metadata_error := _trial_metadata_error(observed_model, permission_mode, sandbox)):
+        status, error, error_code = "FAILED", metadata_error, "MCP_PROTOCOL_ERROR"
     elif agent_status != "SUCCESS":
         status, error, error_code = "FAILED", f"Antigravity terminal status: {agent_status or 'missing'}", "WORKER_EXECUTION_FAILED"
     else:
@@ -402,13 +589,18 @@ async def _execute(task_id: str, operation_id: str, invocation_kind: str, attemp
         "timed_out": raw["timed_out"],
         "output_limited": raw["output_limited"],
         "conversation_id": observed_conversation,
+        "requested_model": requested_model,
         "observed_model": observed_model,
         "observed_agent": observed_agent,
+        "permission_mode": permission_mode,
+        "sandbox": sandbox,
+        "evidence_source": "antigravity.stdout.stream-json",
+        "evidence_truncated": evidence_truncated,
         "started_at": started_at,
         "finished_at": finished_at,
         "command": _display_command(command),
         "stdout": raw["stdout"],
-        "stdout_events": events,
+        "stdout_events": evidence_events,
         "stderr": raw["stderr"],
         "final_summary": _redact(_final_summary(events) or ""),
         "error": _redact(error) if error else None,

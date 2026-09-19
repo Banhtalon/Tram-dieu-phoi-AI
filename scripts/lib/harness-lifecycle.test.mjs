@@ -265,6 +265,39 @@ test('worktree resolver maps task_id and rejects traversal and symlink escape', 
   }
 });
 
+test('local trial resolver uses an external absolute root and rejects repository overlap', async t => {
+  const f = await fixture();
+  const trialRoot = await mkdtemp(path.join(os.tmpdir(), 'qq-antigravity-local-trial-'));
+  const trialId = 'TASK-TRIAL';
+  const config = {
+    ...f.config,
+    test_mode: false,
+    worker: {
+      ...f.config.worker,
+      local_trial: true,
+      local_trial_root: trialRoot,
+      model: 'gemini-3.8-flash-high'
+    }
+  };
+  t.after(async () => {
+    execFileSync('git', ['worktree', 'remove', '--force', path.join(trialRoot, trialId)], { cwd: f.root, stdio: 'ignore' });
+    await rm(trialRoot, { recursive: true, force: true });
+    await f.cleanup();
+  });
+  const resolved = await resolveTaskWorktree(trialId, {
+    task: { task_id: trialId, base_sha: f.base },
+    taskPath: f.taskPath,
+    repoRoot: f.root,
+    config
+  });
+  assert.equal(path.resolve(resolved.worktreeRoot), path.resolve(trialRoot));
+  assert.equal(path.resolve(resolved.workspace), path.resolve(trialRoot, trialId));
+  await assert.rejects(
+    () => resolveTaskWorktree('TASK-OVERLAP', { task: { task_id: 'TASK-OVERLAP', base_sha: f.base }, taskPath: f.taskPath, repoRoot: f.root, config: { ...config, worker: { ...config.worker, local_trial_root: path.join(f.root, 'trial-root') } } }),
+    error => error.code === 'WORKTREE_ROOT_INVALID'
+  );
+});
+
 test('MCP abstraction dispatches, captures untracked files, and does not commit', async t => {
   const f = await fixture();
   t.after(f.cleanup);
@@ -277,6 +310,27 @@ test('MCP abstraction dispatches, captures untracked files, and does not commit'
   const packet = JSON.parse(await readFile(path.join(f.workspace, '.workflow-local', f.id, 'review-packet.json'), 'utf8'));
   assert.equal(packet.changed_files.find(file => file.path === 'demo.py').status, 'untracked');
   assert.equal(packet.review_result.verdict, 'PASS');
+});
+
+test('lifecycle preserves unknown sandbox and bounded redacted worker evidence', async t => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  const originalExecute = f.worker.execute.bind(f.worker);
+  f.worker.execute = async (...args) => ({
+    ...await originalExecute(...args),
+    sandbox: null,
+    evidence_source: 'antigravity.stdout.stream-json',
+    evidence_truncated: true,
+    stdout_events: [{ event: 'tool_result', result: { token: 'sk-abcdefghijklmnop' } }]
+  });
+
+  const result = await runHarnessLifecycle(f.options);
+  assert.equal(result.status, 'WAITING_FOR_CHECKPOINT');
+  assert.equal(result.latest_execution.sandbox, null);
+  assert.equal(result.latest_execution.evidence_truncated, true);
+  const evidence = JSON.stringify(result.latest_execution.stdout_events);
+  assert.match(evidence, /REDACTED/);
+  assert.doesNotMatch(evidence, /sk-abcdefghijklmnop/);
 });
 
 test('REQUEST_CHANGES increments rework_count and continue reuses conversation', async t => {
@@ -574,6 +628,51 @@ test('worker timeout and output limit never trigger a second automatic execution
     assert.equal(replay.status, 'RECOVERY_REQUIRED');
     assert.equal(f.worker.calls.length, 0);
   }
+});
+
+test('scope violation wins over timeout without dropping execution evidence or retrying', async t => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  let dispatches = 0;
+  f.worker.execute = async (task, prompt, operation) => {
+    dispatches += 1;
+    return {
+      task_id: task.task_id,
+      status: 'TIMED_OUT',
+      agent_status: 'FAILED',
+      exit_code: 1,
+      operation_id: operation.id,
+      invocation_kind: operation.kind,
+      attempt: operation.attempt,
+      rework_count: operation.rework_count,
+      timed_out: true,
+      output_limited: false,
+      conversation_id: 'scope-timeout-conversation',
+      requested_model: 'gemini-3.8-flash-high',
+      observed_model: 'gemini-3.8-flash-high',
+      evidence_source: 'antigravity.stdout.stream-json',
+      evidence_truncated: true,
+      stdout_events: [{ event: 'evidence_summary', truncated: true }],
+      error_code: 'WORKER_SCOPE_VIOLATION',
+      error: 'view_file AbsolutePath is outside the resolved workspace',
+      stderr: ''
+    };
+  };
+  const result = await runHarnessLifecycle(f.options);
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.error.code, 'WORKER_SCOPE_VIOLATION');
+  assert.equal(result.error.retryable, false);
+  assert.equal(result.in_flight, null);
+  assert.equal(result.latest_execution.error_code, 'WORKER_SCOPE_VIOLATION');
+  assert.equal(result.latest_execution.timed_out, true);
+  assert.equal(result.latest_execution.exit_code, 1);
+  assert.equal(result.latest_execution.observed_model, 'gemini-3.8-flash-high');
+  assert.equal(result.latest_execution.conversation_id, 'scope-timeout-conversation');
+  assert.equal(result.latest_execution.evidence_truncated, true);
+  assert.equal(dispatches, 1);
+  const replay = await runHarnessLifecycle(f.options);
+  assert.equal(replay.status, 'FAILED');
+  assert.equal(dispatches, 1);
 });
 
 test('invalid MCP preflight response stays before dispatch', async t => {

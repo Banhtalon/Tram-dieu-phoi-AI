@@ -9,7 +9,7 @@ import { git, readJson } from './workflow.mjs';
 import { assertControlledContract } from './controlled-bridge.mjs';
 import { runRedacted } from './redact.mjs';
 import { invoke, validateBinding } from './bridge-adapters.mjs';
-import { AntigravityMcpWorker, assertWorkerIsolation } from './implementation-worker.mjs';
+import { AntigravityMcpWorker, assertWorkerIsolation, boundedEvidence } from './implementation-worker.mjs';
 import { ERROR_CODES, errorRecord, harnessError, operationId as stableOperationId } from './harness-errors.mjs';
 import { auditEvent, auditSummary, operationEvent, transitionFields } from './harness-observability.mjs';
 
@@ -55,6 +55,7 @@ const DEFAULT_MAX_REWORK = 3;
 const MAX_PACKET_TEXT = 256 * 1024;
 const MAX_TEST_OUTPUT = 8 * 1024;
 const MUTATION_LOCK_STALE_MS = 30_000;
+const LOCAL_TRIAL_MODEL = 'gemini-3.8-flash-high';
 
 function fail(code, message, details = {}) {
   const error = harnessError(code, message, {
@@ -116,6 +117,16 @@ function lifecycleConfig(config = {}) {
   }
   if (!Array.isArray(worker.command) || worker.command.length < 1 || worker.command.length > 2) throw fail('INVALID_CONFIG', 'MCP worker command must contain an executable and optional script');
   if (worker.skip_permissions === true && config.production === true) throw fail('INVALID_CONFIG', 'production MCP config must keep skip_permissions=false');
+  if (worker.local_trial !== undefined && typeof worker.local_trial !== 'boolean') throw fail('INVALID_CONFIG', 'worker.local_trial must be true or false');
+  if (config.test_mode === true && worker.local_trial === true) throw fail('CONFIG_MISMATCH', 'test_mode and worker.local_trial cannot be enabled together');
+  if (worker.local_trial === true) {
+    if (config.production === true) throw fail('CONFIG_MISMATCH', 'local_trial is not allowed for production');
+    if (worker.model !== LOCAL_TRIAL_MODEL) throw fail('CONFIG_MISMATCH', `local_trial requires worker.model=${LOCAL_TRIAL_MODEL}`);
+    if (worker.skip_permissions === true) throw fail('CONFIG_MISMATCH', 'local_trial requires skip_permissions=false');
+    if (typeof worker.local_trial_root !== 'string' || !path.isAbsolute(worker.local_trial_root)) throw fail('WORKTREE_ROOT_INVALID', 'local_trial_root must be an absolute path');
+  } else if (worker.local_trial_root !== undefined) {
+    throw fail('CONFIG_MISMATCH', 'local_trial_root requires worker.local_trial=true');
+  }
   if (config.auto_commit === true || config.auto_checkpoint === true) throw fail('INVALID_CONFIG', 'auto commit and auto checkpoint are disabled safe defaults');
   if (worker.provider !== undefined && worker.provider !== 'mcp') throw fail('CONFIG_MISMATCH', 'MCP worker provider must be mcp');
   const reviewer = config.reviewer;
@@ -475,6 +486,7 @@ export function assertDispatchAllowed(control) {
 
 function configuredWorktreeRoot(repoRoot, config = {}) {
   const root = path.resolve(repoRoot);
+  if (config.worker?.local_trial === true) return path.resolve(config.worker.local_trial_root);
   const configured = config.lifecycle?.worktree_root ?? '.worktrees';
   const candidate = path.resolve(root, configured);
   if (!isWithin(root, candidate)) throw fail('WORKTREE_ROOT_INVALID', 'worktree root must stay inside the project root');
@@ -485,6 +497,7 @@ async function canonicalDirectory(directory, label) {
   const info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw fail('WORKTREE_INVALID', `${label} must be a real directory`);
   const canonical = await realpath(directory);
+  if (canonical.toLowerCase() !== path.resolve(directory).toLowerCase()) throw fail('WORKTREE_INVALID', `${label} must not be a junction or symlink`);
   return canonical;
 }
 
@@ -493,10 +506,15 @@ export async function resolveTaskWorktree(taskIdValue, { task, taskPath, repoRoo
   const sourceRoot = path.resolve(repoRoot ?? repositoryRoot(path.dirname(taskPath)));
   const canonicalSourceRoot = await realpath(sourceRoot);
   const worktreeRoot = configuredWorktreeRoot(sourceRoot, config);
+  const localTrial = config.worker?.local_trial === true;
   if (!existsSync(worktreeRoot) && !create) throw fail('WORKTREE_NOT_FOUND', 'configured WORKTREE_ROOT does not exist');
   await mkdir(worktreeRoot, { recursive: true });
   const canonicalRoot = await canonicalDirectory(worktreeRoot, 'WORKTREE_ROOT');
-  if (!isWithin(canonicalSourceRoot, canonicalRoot)) throw fail('WORKTREE_ROOT_INVALID', 'worktree root resolves outside the project root');
+  if (localTrial) {
+    if (isWithin(canonicalSourceRoot, canonicalRoot) || isWithin(canonicalRoot, canonicalSourceRoot)) throw fail('WORKTREE_ROOT_INVALID', 'local_trial_root must be outside the repository and control roots');
+  } else if (!isWithin(canonicalSourceRoot, canonicalRoot)) {
+    throw fail('WORKTREE_ROOT_INVALID', 'worktree root resolves outside the project root');
+  }
   const candidate = path.resolve(canonicalRoot, id);
   if (!isWithin(canonicalRoot, candidate) || path.basename(candidate).toLowerCase() !== id.toLowerCase()) {
     throw fail('WORKTREE_ESCAPE', 'task worktree escapes WORKTREE_ROOT');
@@ -638,8 +656,16 @@ function safeWorkerResult(result) {
     attempt: Number.isInteger(result?.attempt) ? result.attempt : null,
     rework_count: Number.isInteger(result?.rework_count) ? result.rework_count : null,
     conversation_id: result?.conversation_id ?? null,
+    error_code: typeof result?.error_code === 'string' ? result.error_code : null,
+    requested_model: result?.requested_model ?? null,
     observed_model: result?.observed_model ?? null,
     observed_agent: result?.observed_agent ?? null,
+    permission_mode: result?.permission_mode ?? null,
+    sandbox: typeof result?.sandbox === 'boolean' ? result.sandbox : null,
+    evidence_source: typeof result?.evidence_source === 'string' ? result.evidence_source : null,
+    evidence_truncated: result?.evidence_truncated === true,
+    stdout_events: boundedEvidence(result?.stdout_events),
+    command: Array.isArray(result?.command) ? result.command.filter(value => typeof value === 'string') : [],
     final_summary: typeof result?.final_summary === 'string' ? result.final_summary.slice(0, MAX_TEST_OUTPUT) : null,
     error: typeof result?.error === 'string' ? result.error.slice(-MAX_TEST_OUTPUT) : null,
     stderr: typeof result?.stderr === 'string' ? result.stderr.slice(-MAX_TEST_OUTPUT) : ''
@@ -968,6 +994,7 @@ async function releaseWorker(options, worker, worktree) {
 function workerError(result, taskIdValue, operation) {
   const base = { task_id: taskIdValue, operation };
   if (result?.status === 'NO_RESULT' || result?.error_code === 'NO_RESULT') return fail('CONVERSATION_LOST', 'MCP result has no persisted conversation after worker restart', base);
+  if (result?.error_code === 'WORKER_SCOPE_VIOLATION') return fail('WORKER_SCOPE_VIOLATION', String(result?.error ?? 'worker read a file outside the resolved workspace'), base);
   if (result?.timed_out === true || result?.status === 'TIMED_OUT') return fail('WORKER_TIMEOUT', 'implementation worker timed out', base);
   if (result?.output_limited === true || result?.status === 'OUTPUT_LIMIT') return fail('WORKER_OUTPUT_LIMIT', 'implementation worker output exceeded the configured limit', base);
   if (result?.status === 'UNAVAILABLE') return fail('WORKER_UNAVAILABLE', 'implementation worker is unavailable', base);

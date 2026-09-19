@@ -243,6 +243,30 @@ Owner approves intent/consequences, never technical waivers. If safe resolution 
 unavailable, stop with a plain-language blocker and keep the working version.
 No hosted, production, or live acceptance claim from local tests.
 
+The supervised Antigravity local trial is an explicit opt-in only: `worker.local_trial`
+defaults to false, requires `worker.model=gemini-3.8-flash-high` and an absolute
+`worker.local_trial_root` outside the repository and Harness/control roots, and must
+not be combined with `test_mode` or `skip_permissions`. The bridge passes sandbox,
+accept-edits and a unit-bearing timeout to the CLI, but does not infer provider
+permission metadata from those requested flags: `accept-edits` is an execution mode,
+while `request-review` is the documented default permission mode. The provider must
+report the requested model and pass protocol/status/exit checks; nullable permission
+and sandbox metadata remains observational, with missing or unknown values kept as
+unknown. Explicit `always-proceed` or `sandbox=false` is rejected, while file
+snapshot/diff evidence is still required for trial acceptance.
+Post-spawn validation rejects an unsafe result but cannot undo side effects, so every
+trial records a bounded redacted init/result/tool evidence summary and a workspace
+snapshot/diff before and after execution, including rejection and timeout. This trial
+proves neither OS isolation nor production readiness; the default path remains
+fail-closed.
+The parsed stream is checked before evidence is bounded: when a proven `view_file`
+step reports `AbsolutePath`, it must be an absolute canonical path contained by the
+resolved workspace. Relative, drive-relative, UNC, parent-traversal and reparse/junction
+paths are rejected with `WORKER_SCOPE_VIOLATION`. This is a post-run acceptance guard;
+it cannot undo a read or other side effect and it does not claim to monitor every tool.
+The code is non-retryable and preserves timeout, exit, model, conversation and bounded
+evidence fields so a scope finding cannot hide a simultaneous execution failure.
+
 ## Stage boundary
 ASSISTED is the default. Lead can execute locally and use already available
 independent sessions/tools; missing capability is WAITING_CAPABILITY.
