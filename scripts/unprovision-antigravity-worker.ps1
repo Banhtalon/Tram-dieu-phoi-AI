@@ -166,6 +166,10 @@ try {
     Stop-Security 'SERVICE_LOGON_RIGHT_FAILED' 'Marker cho biết SeServiceLogonRight đã được cấp nhưng rollback chưa có provider SID/LSA an toàn để thu hồi.'
   }
 
+  $markerAccountName = [string](Get-Field $Marker 'worker_account_name')
+  $markerAccount = Get-LocalUser -Name $markerAccountName -ErrorAction SilentlyContinue
+  Assert-RollbackDeletionPreconditions -RemoveTestData:$RemoveTestData -RemoveWorkerAccount:$RemoveWorkerAccount -WorkerAccountPresent:($null -ne $markerAccount) -RemovalSafetyProof $null
+
   $liveService = Get-LiveService ([string](Get-Field $Marker 'service_name'))
   if ($liveService) {
     Assert-ServiceOwnership $Marker $liveService

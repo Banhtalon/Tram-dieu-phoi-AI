@@ -82,7 +82,12 @@ function Convert-ToAbsolutePath {
   if ([string]::IsNullOrWhiteSpace($Value) -or -not [IO.Path]::IsPathRooted($Value)) {
     Stop-Security 'PROVISIONING_PATH_ESCAPE' "Đường dẫn phải là absolute path: $Value"
   }
-  return [IO.Path]::GetFullPath($Value).TrimEnd('\')
+  $full = [IO.Path]::GetFullPath($Value)
+  $root = [IO.Path]::GetPathRoot($full)
+  if ([string]::Equals($full, $root, [StringComparison]::OrdinalIgnoreCase)) {
+    return $root
+  }
+  return $full.TrimEnd('\')
 }
 
 function Test-SameOrInside {
@@ -222,7 +227,7 @@ function Assert-TestRoot {
   )
 
   $full = Convert-ToAbsolutePath $Value
-  if ($full -eq ([IO.Path]::GetPathRoot($full)).TrimEnd('\')) {
+  if ([string]::Equals($full, [IO.Path]::GetPathRoot($full), [StringComparison]::OrdinalIgnoreCase)) {
     Stop-Security 'PROVISIONING_PATH_ESCAPE' "$Label không được là root của ổ đĩa"
   }
   if ((Split-Path -Leaf $full) -notmatch '(?i)(-Test|-Isolation)$') {
@@ -323,6 +328,53 @@ function Assert-AccountSidOwnership {
   if ($ActualSid -ne $ExpectedSid) {
     Stop-Security 'WORKER_ACCOUNT_SID_MISMATCH' 'Account cùng tên nhưng SID hiện tại khác marker; không xóa.'
   }
+}
+
+function Assert-RollbackDeletionProof {
+  param([object]$Proof)
+
+  $requiredFields = @('status', 'exclusive_delete_lock', 'worker_stopped', 'active_handles', 'root_fingerprint_before', 'root_fingerprint_after')
+  if ($null -eq $Proof) {
+    Stop-Security 'ROLLBACK_SAFE_STOP_UNAVAILABLE' 'Chưa có bằng chứng độc quyền đủ mạnh để xóa cây dữ liệu; giữ marker.'
+  }
+  foreach ($field in $requiredFields) {
+    if ($null -eq $Proof.PSObject.Properties[$field]) {
+      Stop-Security 'ROLLBACK_SAFE_STOP_UNAVAILABLE' "Bằng chứng xóa thiếu trường bắt buộc: $field"
+    }
+  }
+  try {
+    $activeHandles = [int](Get-Field $Proof 'active_handles')
+  } catch {
+    Stop-Security 'ROLLBACK_SAFE_STOP_UNAVAILABLE' 'Bằng chứng xóa có số handle không hợp lệ.'
+  }
+  if ((Get-Field $Proof 'status') -ne 'VERIFIED_EXCLUSIVE_REMOVAL' -or
+      (Get-Field $Proof 'exclusive_delete_lock') -ne $true -or
+      (Get-Field $Proof 'worker_stopped') -ne $true -or
+      $activeHandles -ne 0) {
+    Stop-Security 'ROLLBACK_SAFE_STOP_UNAVAILABLE' 'Worker hoặc handle còn hoạt động; không xóa cây dữ liệu.'
+  }
+  $before = [string](Get-Field $Proof 'root_fingerprint_before')
+  $after = [string](Get-Field $Proof 'root_fingerprint_after')
+  if ([string]::IsNullOrWhiteSpace($before) -or $before -ne $after) {
+    Stop-Security 'ROLLBACK_SAFE_STOP_UNAVAILABLE' 'Cây dữ liệu đã thay đổi sau kiểm tra; không xóa và giữ marker.'
+  }
+}
+
+function Assert-RollbackDeletionPreconditions {
+  param(
+    [switch]$RemoveTestData,
+    [switch]$RemoveWorkerAccount,
+    [bool]$WorkerAccountPresent,
+    [object]$RemovalSafetyProof = $null
+  )
+
+  if (-not $RemoveTestData) {
+    return
+  }
+  if ($WorkerAccountPresent -and -not $RemoveWorkerAccount) {
+    Stop-Security 'ROLLBACK_OWNERSHIP_UNPROVEN' 'Không xóa marker/root khi AIWorker còn tồn tại mà Owner chưa yêu cầu gỡ account.'
+  }
+  Assert-RollbackDeletionProof $RemovalSafetyProof
 }
 
 function Assert-TrustedServiceBinary {

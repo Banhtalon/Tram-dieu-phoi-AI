@@ -33,6 +33,74 @@ Assert-Equal (Assert-ManifestPath $manifestRoot "$manifestRoot\manifest.json") "
 Assert-SecurityCode { Assert-ManifestPath $manifestRoot 'C:\ProgramData\outside.json' } 'PROVISIONING_PATH_ESCAPE' 'manifest path خارج root'
 Assert-SecurityCode { Assert-ManifestPath $manifestRoot "$manifestRoot\..\outside.json" } 'PROVISIONING_PATH_ESCAPE' 'manifest path traversal'
 Assert-SecurityCode { Assert-TestRoot 'C:\Windows' 'CONTROL_ROOT' } 'PROVISIONING_PATH_ESCAPE' 'production root bị từ chối'
+Assert-Equal (Convert-ToAbsolutePath 'C:\') ([IO.Path]::GetPathRoot('C:\')) 'drive root vẫn giữ dấu gạch cuối'
+Assert-Equal (Test-SameOrInside 'C:\' 'C:\Windows') $true 'containment của drive root hoạt động'
+
+$dryRunCases = @(
+  [pscustomobject]@{
+    Name = 'provision default dry-run'
+    Script = (Join-Path $PSScriptRoot 'provision-antigravity-worker.ps1')
+    Arguments = @('-DryRun')
+  },
+  [pscustomobject]@{
+    Name = 'unprovision default dry-run'
+    Script = (Join-Path $PSScriptRoot 'unprovision-antigravity-worker.ps1')
+    Arguments = @('-DryRun', '-RemoveTestData')
+  }
+)
+foreach ($dryRunCase in $dryRunCases) {
+  $dryRunOutput = (& pwsh -NoLogo -NoProfile -File $dryRunCase.Script @($dryRunCase.Arguments) 2>&1 | Out-String).Trim()
+  $dryRunExit = $LASTEXITCODE
+  try {
+    $dryRunResult = $dryRunOutput | ConvertFrom-Json
+  } catch {
+    throw "$($dryRunCase.Name) không trả JSON: $dryRunOutput"
+  }
+  $dryRunCode = Get-Field $dryRunResult 'error_code'
+  if ($dryRunExit -ne 0 -and $dryRunCode -eq 'PROVISIONING_FAILED') {
+    throw "$($dryRunCase.Name) vẫn trả lỗi đường dẫn chung chung: $dryRunOutput"
+  }
+  $passed++
+  Write-Output "PASS $($dryRunCase.Name) trả kết quả có cấu trúc"
+}
+
+$partialRollbackRoot = Join-Path ([IO.Path]::GetTempPath()) ('qq-partial-rollback-' + [guid]::NewGuid().Guid)
+[IO.Directory]::CreateDirectory($partialRollbackRoot) | Out-Null
+$partialMarkerPath = Join-Path $partialRollbackRoot 'marker.json'
+Set-Content -LiteralPath $partialMarkerPath -Value '{"schema":"qq.antigravity.worker.marker.v2"}' -Encoding UTF8
+$deleteProbe = [pscustomobject]@{ Data = 0; Account = 0 }
+try {
+  Assert-SecurityCode {
+    Assert-RollbackDeletionPreconditions -RemoveTestData -WorkerAccountPresent $true -RemovalSafetyProof $null
+    $deleteProbe.Data++
+    Remove-Item -LiteralPath $partialMarkerPath -Force
+  } 'ROLLBACK_OWNERSHIP_UNPROVEN' 'partial rollback giữ marker khi account còn'
+  Assert-Equal (Test-Path -LiteralPath $partialMarkerPath -PathType Leaf) $true 'partial rollback không xóa marker'
+  Assert-Equal $deleteProbe.Account 0 'partial rollback không tự xóa account'
+
+  Assert-RollbackDeletionPreconditions -RemoveWorkerAccount -WorkerAccountPresent $true -RemovalSafetyProof $null
+  $deleteProbe.Account++
+  Assert-Equal $deleteProbe.Data 0 'lần gỡ tiếp theo không xóa dữ liệu ngoài yêu cầu'
+  Assert-Equal (Test-Path -LiteralPath $partialMarkerPath -PathType Leaf) $true 'marker còn cho lần gỡ tiếp theo'
+
+  $unsafeProof = [pscustomobject]@{
+    status = 'VERIFIED_EXCLUSIVE_REMOVAL'
+    exclusive_delete_lock = $true
+    worker_stopped = $true
+    active_handles = 0
+    root_fingerprint_before = 'before'
+    root_fingerprint_after = 'after'
+  }
+  Assert-SecurityCode {
+    Assert-RollbackDeletionPreconditions -RemoveTestData -RemoveWorkerAccount -WorkerAccountPresent $false -RemovalSafetyProof $unsafeProof
+    $deleteProbe.Data++
+  } 'ROLLBACK_SAFE_STOP_UNAVAILABLE' 'cây thay đổi sau kiểm tra phải dừng trước xóa'
+  Assert-Equal $deleteProbe.Data 0 'nhánh nguy hiểm không gọi xóa'
+} finally {
+  if (Test-Path -LiteralPath $partialRollbackRoot) {
+    Remove-Item -LiteralPath $partialRollbackRoot -Recurse -Force
+  }
+}
 
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $broadRule = [System.Security.AccessControl.FileSystemAccessRule]::new(
@@ -181,8 +249,11 @@ foreach ($required in @(
   'Assert-ManifestHash',
   'Assert-TrustedAclOwner',
   'Assert-ManagedAclObject',
+  'Assert-RollbackDeletionPreconditions',
+  'Assert-RollbackDeletionProof',
   'Write-JsonObjectPropertyAtomic',
   'Write-RollbackMarkerObject',
+  'ROLLBACK_SAFE_STOP_UNAVAILABLE',
   'SERVICE_CONFIG_MISMATCH',
   'WORKER_ACCOUNT_SID_MISMATCH',
   'Assert-WorkerGroupMembership',

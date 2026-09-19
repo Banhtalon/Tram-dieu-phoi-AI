@@ -150,9 +150,9 @@ responsibilities. The worker service only executes the operation it receives.
 
 ## Provisioning and rollback scripts
 
-Source remediation for Gate A is complete in the repair worktree, but neither
-script has been run against the real host. The scripts remain test-boundary
-only and fail closed before any OS mutation when a prerequisite is not proven.
+The bounded source remediation is in the repair worktree, but neither script
+has been run against the real host. The scripts remain test-boundary only and
+fail closed before any OS mutation when a prerequisite is not proven.
 
 - `scripts/provision-antigravity-worker.ps1` now uses marker schema v2 with a
   `provisioning_id`, worker SID, service binary path/hash, ownership flags,
@@ -186,6 +186,22 @@ The first command reports user, roots, ACL classes, service registration,
 firewall (`NONE`), Windows features (`NONE`) and credential handling. It does
 not create anything. If the parent has broad write access, it returns
 `ACL_BASELINE_UNSAFE` instead of claiming the child root is safe.
+
+Both scripts require the immediate parent of every requested root to already
+exist and have a trusted owner/ACL. They never create a missing parent or
+change Windows permissions to make a dry-run pass. A default dry-run may
+therefore stop with a structured safety error when `C:\ProgramData\QQ` or
+another parent is missing/unsafe; that is an expected stop, not permission to
+continue with real provisioning. Drive roots such as `C:\` are preserved as
+roots during normalization so the result remains a valid Windows path.
+
+Data removal is currently fail-closed. `-RemoveTestData` is rejected when the
+worker account still exists and the Owner did not request account removal. It
+also remains rejected until a reviewed provider can prove exclusive removal
+conditions (worker stopped, no active handles, and an unchanged protected
+tree). If that proof is unavailable or the tree changes after checking, the
+script stops before deletion and keeps the marker. Account-only rollback does
+not automatically remove test data.
 
 ## Self-test and acceptance criteria
 
