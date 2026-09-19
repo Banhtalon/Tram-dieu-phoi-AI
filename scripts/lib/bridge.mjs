@@ -72,7 +72,7 @@ export async function loadReviewSource(packetDir,r){
 async function boundReadiness(t,e,r,config,packetDir){
   return readiness(t,e,r,{reviewerBinding:config[executionRoute(t).reviewer],sourceSnapshot:await loadReviewSource(packetDir,r),sourceConfigHash:configHash(config)});
 }
-export async function bridgeHash(){return hash(await Promise.all(['bridge.mjs','bridge-adapters.mjs','bridge-process.mjs','workflow.mjs','redact.mjs','receipts.mjs'].map(f=>readFile(new URL(f,import.meta.url),'utf8'))));}
+export async function bridgeHash(){return hash(await Promise.all(['bridge.mjs','bridge-adapters.mjs','bridge-process.mjs','workflow.mjs','redact.mjs','receipts.mjs','harness-lifecycle.mjs','implementation-worker.mjs','mcp-client.mjs'].map(f=>readFile(new URL(f,import.meta.url),'utf8'))));}
 export async function acquire(cwd) {
   // Common Git directory makes the writer lock apply across linked worktrees.
   const common=git(cwd,'rev-parse','--path-format=absolute','--git-common-dir').trim();
@@ -229,11 +229,21 @@ function checkpoint(cwd) {return {head:cleanHead(cwd),branch:git(cwd,'symbolic-r
 export async function runBridge(options) {
   let {cwd,taskPath,config,packetDir,pilot=false,resume=false,signal}=options;
   if(config?.schema_version==='qq.bridge.v2'){
+    if(config.worker?.transport==='mcp'){
+      const {runHarnessLifecycle}=await import('./harness-lifecycle.mjs');
+      return runHarnessLifecycle(options);
+    }
+    if(config.legacy_direct_cli!==true)throw Error('controlled lifecycle requires worker.transport=mcp; direct CLI is diagnostic-only');
     const {runControlledBridge}=await import('./controlled-bridge.mjs');
     return runControlledBridge(options);
   }
   let peekTask=null;try{peekTask=await readJson(taskPath);}catch{}
   if(peekTask?.schema_version==='qq.workflow.task.v10.1'||peekTask?.execution?.policy==='CONTROLLED_DELEGATION_V1'){
+    if(config?.worker?.transport==='mcp'){
+      const {runHarnessLifecycle}=await import('./harness-lifecycle.mjs');
+      return runHarnessLifecycle(options);
+    }
+    if(config?.legacy_direct_cli!==true)throw Error('controlled lifecycle requires worker.transport=mcp; direct CLI is diagnostic-only');
     const {runControlledBridge}=await import('./controlled-bridge.mjs');
     return runControlledBridge(options);
   }

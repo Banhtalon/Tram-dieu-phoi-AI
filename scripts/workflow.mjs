@@ -38,6 +38,16 @@ try{
     }
     result=await verify(task,cwd);await writeJson(out,result);
     if(result.status!=="PASS")process.exitCode=1;
+  }else if(command==="doctor"&&(args.length===2||args.length===3)){
+    const {healthCheck}=await import('./lib/harness-lifecycle.mjs');
+    result=await healthCheck({repoRoot:path.resolve(args[1]),config:await readJson(args[0])});
+    if(result.status!=="PASS")process.exitCode=1;
+  }else if((command==="lifecycle-status"||command==="status")&&args.length===3&&args[0].toLowerCase().endsWith('.json')){
+    const {inspectTask}=await import('./lib/harness-lifecycle.mjs');
+    result=await inspectTask({config:await readJson(args[0]),taskPath:args[1],packetDir:args[2]});
+  }else if(command==="stale-scan"&&args.length===1){
+    const {scanStaleTasks}=await import('./lib/harness-lifecycle.mjs');
+    result=await scanStaleTasks({packetRoot:path.resolve(args[0])});
   }else if(command==="status"&&(args.length===4||args.length===5)){
     const t=await readJson(args[0]);await assertContract(args[0],t);cleanHead(args[3],t.candidate_head);
     const optional=async p=>{try{return await readJson(p);}catch(e){if(e.code==="ENOENT")return null;throw e;}};
@@ -51,4 +61,4 @@ try{
     if(command!=="help")process.exitCode=64;
   }
   if(result)console.log(redactText(JSON.stringify(result,null,2)));
-}catch(e){console.error(redactText("BLOCKED: "+e.message));process.exitCode=1;}
+}catch(e){console.error(redactText(JSON.stringify(e?.harness ?? {code:e?.code??'INTERNAL_ERROR',message:e?.message??String(e),timestamp:new Date().toISOString()})));process.exitCode=1;}

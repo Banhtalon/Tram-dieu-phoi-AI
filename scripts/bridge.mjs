@@ -20,19 +20,43 @@ try {
     process.exitCode=0;
   } else if(command==='doctor') {
     const [config,cwd,dir,...flags]=args;
-    result=await inspect(path.resolve(cwd),await readJson(config),path.resolve(dir),flags.includes('--probe'),controller.signal);
+    const loadedConfig=await readJson(config);
+    if (loadedConfig?.schema_version==='qq.bridge.v2' && loadedConfig.worker?.transport==='mcp') {
+      const {healthCheck}=await import('./lib/harness-lifecycle.mjs');
+      result=await healthCheck({repoRoot:path.resolve(cwd),config:loadedConfig});
+    } else result=await inspect(path.resolve(cwd),loadedConfig,path.resolve(dir),flags.includes('--probe'),controller.signal);
   } else if(['pilot','run','resume'].includes(command)) {
     const [config,task,cwd,dir]=args;
     packetDir=dir;
     result=await runBridge({config:await readJson(config),taskPath:task,cwd,packetDir,pilot:command==='pilot'||(command==='resume'&&args.includes('--pilot')),resume:command==='resume',signal:controller.signal});
+  } else if(['request-changes','continue','checkpoint','reject-checkpoint','complete','recover','reconcile'].includes(command)) {
+    const [config,task,cwd,dir,...rest]=args;
+    const lifecycle=await import('./lib/harness-lifecycle.mjs');
+    const options={config:await readJson(config),taskPath:task,cwd,packetDir:dir};
+    if(command==='request-changes'||command==='continue')options.instruction=rest.join(' ');
+    if(command==='reject-checkpoint'){options.reason=rest.join(' ');options.rejectedBy=options.owner;}
+    if(command==='recover'){options.decision='block';options.reason=rest.join(' ');options.operator=options.owner;}
+    result=command==='request-changes'?await lifecycle.requestChanges(options):command==='continue'?await lifecycle.continueHarnessLifecycle(options):command==='checkpoint'?await lifecycle.approveCheckpoint(options):command==='reject-checkpoint'?await lifecycle.rejectCheckpoint(options):command==='recover'?await lifecycle.recoverTask(options):command==='reconcile'?await lifecycle.reconcileTask(options):await lifecycle.completeTask(options);
+  } else if(command==='inspect') {
+    const [config,task,dir]=args;
+    const {inspectTask}=await import('./lib/harness-lifecycle.mjs');
+    result=await inspectTask({config:await readJson(config),taskPath:task,packetDir:dir});
+  } else if(command==='stale-scan') {
+    const {scanStaleTasks}=await import('./lib/harness-lifecycle.mjs');
+    result=await scanStaleTasks({packetRoot:path.resolve(args[0])});
   } else if(command==='quota-drill')result=await quotaDrill(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
   else if(command==='activate')result=await activate(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
   else if(command==='status')result=await readJson(path.join(args[0],'state.json'));
-  else throw Error('Usage: bridge.mjs doctor <config> <repo> <packets> [--probe] | pilot/run/resume <config> <task> <repo> <packets> [--pilot] | quota-drill <config> <accepted-pilot-packets> <activation-packets> | activate <config> <accepted-pilot-packets> <activation-packets> | status <packets> | report <packets> [--audience owner|lead] [--format json|md]');
+  else throw Error('Usage: bridge.mjs doctor <config> <repo> <packets> [--probe] | pilot/run/resume <config> <task> <repo> <packets> [--pilot] | request-changes/continue/checkpoint/complete <config> <task> <repo> <packets> [instruction] | quota-drill <config> <accepted-pilot-packets> <activation-packets> | activate <config> <accepted-pilot-packets> <activation-packets> | status <packets> | report <packets> [--audience owner|lead] [--format json|md]');
   if(command!=='report'){
-    const summary={status:result.status,head:result.head,repair_rounds:result.repair_rounds,senior_passes:result.senior_passes,reconciliation_required:result.reconciliation_required};
-    const output=['pilot','run','resume'].includes(command)?await attachCheckpointReports(summary,packetDir):{result:summary,reportFailed:false};
-    console.log(JSON.stringify(output.result,null,2));
-    process.exitCode=output.reportFailed?1:['ACCEPTED','PROBED','READY_FOR_OWNER','DONE','QUOTA_DRILL_PASS'].includes(result.status)?0:1;
+    if(result?.schema_version?.startsWith('qq.workflow.')){
+      console.log(redactText(JSON.stringify(result,null,2)));
+      process.exitCode=['PASS','FROZEN','CLAIMED','READY_TO_DISPATCH','RUNNING','READY_FOR_REVIEW','REQUEST_CHANGES','REWORKING','WAITING_FOR_CHECKPOINT','CHECKPOINTED','COMPLETED','PAUSED'].includes(result.status)?0:1;
+    } else {
+      const summary={status:result.status,head:result.head,repair_rounds:result.repair_rounds,senior_passes:result.senior_passes,reconciliation_required:result.reconciliation_required};
+      const output=['pilot','run','resume'].includes(command)?await attachCheckpointReports(summary,packetDir):{result:summary,reportFailed:false};
+      console.log(JSON.stringify(output.result,null,2));
+      process.exitCode=output.reportFailed?1:['ACCEPTED','PROBED','READY_FOR_OWNER','DONE','QUOTA_DRILL_PASS'].includes(result.status)?0:1;
+    }
   }
-} catch(error){console.error(redactText(error.message));process.exitCode=1;}
+} catch(error){console.error(redactText(JSON.stringify(error?.harness ?? {code:error?.code??'INTERNAL_ERROR',message:error?.message??String(error),timestamp:new Date().toISOString()})));process.exitCode=1;}

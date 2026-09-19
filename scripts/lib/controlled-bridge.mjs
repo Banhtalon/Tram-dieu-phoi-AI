@@ -2956,3 +2956,6 @@ export {
   controlledQuotaDrill as quotaDrill,
   controlledActivate as activate
 };
+// LEGACY_DIAGNOSTIC_ONLY: this compatibility path retains the old direct-CLI
+// checkpoint/commit behavior. The active Controlled lifecycle is routed by
+// bridge.mjs to harness-lifecycle.mjs and never enters this module.
