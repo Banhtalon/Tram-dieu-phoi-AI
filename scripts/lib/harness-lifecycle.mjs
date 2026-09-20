@@ -10,6 +10,7 @@ import { assertControlledContract } from './controlled-bridge.mjs';
 import { runRedacted } from './redact.mjs';
 import { invoke, validateBinding } from './bridge-adapters.mjs';
 import { AntigravityMcpWorker, assertWorkerIsolation, boundedEvidence } from './implementation-worker.mjs';
+import { withTemporaryWritePermissions } from './temporary-permissions.mjs';
 import { ERROR_CODES, errorRecord, harnessError, operationId as stableOperationId } from './harness-errors.mjs';
 import { auditEvent, auditSummary, operationEvent, transitionFields } from './harness-observability.mjs';
 
@@ -95,6 +96,30 @@ function hash(value) {
 function isWithin(root, candidate) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function temporaryPermissionScope(config, task, workspace) {
+  const configured = config.worker?.temporary_permissions;
+  if (configured === undefined) return null;
+  if (!configured || typeof configured !== 'object' || Array.isArray(configured) || configured.enabled !== true) {
+    throw fail('INVALID_CONFIG', 'worker.temporary_permissions.enabled must be true');
+  }
+  if (typeof configured.settingsPath !== 'string' || !path.isAbsolute(configured.settingsPath)) {
+    throw fail('INVALID_CONFIG', 'worker.temporary_permissions.settingsPath must be an absolute path');
+  }
+  if (!Array.isArray(configured.files) || configured.files.length === 0 || configured.files.some(file => typeof file !== 'string' || !path.isAbsolute(file))) {
+    throw fail('INVALID_CONFIG', 'worker.temporary_permissions.files must contain absolute file paths');
+  }
+  const key = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+  const approved = new Set((task.allowed_paths ?? task.write_paths ?? []).map(file => key(path.join(workspace, file))));
+  if (configured.files.some(file => !approved.has(key(file)))) {
+    throw fail('SCOPE_VIOLATION', 'temporary permission files must match the frozen task scope', { task_id: task.task_id });
+  }
+  return {
+    settingsPath: configured.settingsPath,
+    workspaceRoot: workspace,
+    files: [...configured.files]
+  };
 }
 
 function taskId(value) {
@@ -1168,6 +1193,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   const headBefore = git(state.workspace, 'rev-parse', 'HEAD').trim();
   const previousSignature = state.changeset_signature;
   if (!continuation && state.attempt === 0) await assertInitialWorktreeClean(task, state.workspace);
+  const permissionScope = temporaryPermissionScope(config, task, state.workspace);
   const nextAttempt = continuation ? state.attempt + 1 : 1;
   const operationKey = stableOperationId(task.task_id, continuation ? 'continue' : 'execute', nextAttempt, state.rework_count, task.contract_sha256);
   const operation = {
@@ -1194,7 +1220,14 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   let processRelease = null;
   try {
     processRelease = await acquire(state.workspace);
-    workerResult = continuation ? await worker.continue(task, instruction, operation) : await worker.execute(task, prompt, operation);
+    const invokeWorker = async () => {
+      const result = continuation ? await worker.continue(task, instruction, operation) : await worker.execute(task, prompt, operation);
+      workerResult = result;
+      return result;
+    };
+    workerResult = permissionScope
+      ? await withTemporaryWritePermissions(permissionScope, invokeWorker)
+      : await invokeWorker();
   } catch (error) {
     const mapped = error?.harness ? error : fail(error?.code ?? 'EXECUTION_OUTCOME_UNKNOWN', error?.message ?? 'worker execution outcome is unknown', { task_id: task.task_id, operation: operation.id });
     const uncertain = ['MCP_UNAVAILABLE', 'WORKER_TIMEOUT', 'WORKER_UNAVAILABLE', 'MCP_PROTOCOL_ERROR'].includes(mapped.code);
@@ -1209,7 +1242,9 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
       await auditEvent(paths.packetDir, 'recovery_required', transitionFields(state, { operation_id: operation.id, result: mapped.code, error_code: mapped.code }));
       return resultOf(state);
     }
-    await saveState(state, paths, { phase: LIFECYCLE_STATES.FAILED, status: LIFECYCLE_STATES.FAILED, in_flight: null, error: mapped }, claim);
+    const failure = { phase: LIFECYCLE_STATES.FAILED, status: LIFECYCLE_STATES.FAILED, in_flight: null, error: mapped };
+    if (workerResult) failure.latest_execution = safeWorkerResult(workerResult);
+    await saveState(state, paths, failure, claim);
     throw mapped;
   } finally {
     await processRelease?.();

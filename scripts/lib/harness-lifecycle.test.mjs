@@ -35,7 +35,7 @@ import {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 let serial = 0;
 
-async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = {}) {
+async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qq-harness-lifecycle-'));
   git(root, 'init');
   git(root, 'config', 'user.email', 'harness-test@example.invalid');
@@ -50,6 +50,10 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = 
   await mkdir(worktreeRoot, { recursive: true });
   const workspace = path.join(worktreeRoot, id);
   git(root, 'worktree', 'add', '--detach', workspace, base);
+  const settingsPath = temporaryPermissions ? path.join(root, 'fake-settings.json') : null;
+  const gateObservationPath = temporaryPermissions ? path.join(root, 'gate-observation.json') : null;
+  const permissionObservations = [];
+  if (settingsPath) await writeFile(settingsPath, JSON.stringify({ permissions: { allow: [], deny: [] }, marker: 'fixture' }, null, 2) + '\n');
   const packetRoot = path.join(workspace, '.workflow-local');
   await mkdir(packetRoot, { recursive: true });
   const taskPath = path.join(packetRoot, `${id}.json`);
@@ -60,7 +64,13 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = 
     base_sha: base,
     goal: 'test lifecycle',
     acceptance_criteria: ['create demo files in the frozen scope'],
-    gates: [{ id: 'tests', argv: [process.execPath, '-e', 'process.exit(0)'], timeout_seconds: 20 }],
+    gates: [{
+      id: 'tests',
+      argv: [process.execPath, '-e', settingsPath
+        ? `const fs=require('node:fs');const s=JSON.parse(fs.readFileSync(${JSON.stringify(settingsPath)},'utf8'));fs.writeFileSync(${JSON.stringify(gateObservationPath)},JSON.stringify(s.permissions.allow));`
+        : 'process.exit(0)'],
+      timeout_seconds: 20
+    }],
     user_visible: false,
     risk: 'LOW',
     complexity: 'SIMPLE',
@@ -109,8 +119,16 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = 
     },
     test_mode: true
   };
+  if (temporaryPermissions) {
+    config.worker.temporary_permissions = {
+      enabled: true,
+      settingsPath,
+      files: [path.join(workspace, 'demo.py'), path.join(workspace, 'test_demo.py')]
+    };
+  }
   const reviewerCalls = [];
   const reviewer = async ({ state }) => {
+    if (settingsPath) permissionObservations.push({ phase: 'review', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
     const verdict = reviewerVerdicts[Math.min(reviewerCalls.length, reviewerVerdicts.length - 1)];
     reviewerCalls.push({ verdict, attempt: state.attempt });
     return {
@@ -145,6 +163,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = 
     resultOverride: null,
     async execute(currentTask, prompt, operation) {
       this.calls.push({ tool: 'antigravity_execute', task_id: currentTask.task_id });
+      if (settingsPath) permissionObservations.push({ phase: 'execute', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
       await writeFile(path.join(workspace, 'demo.py'), 'VALUE = "ok"\n');
       await writeFile(path.join(workspace, 'test_demo.py'), 'assert True\n');
       this.lastResult = resultFor(currentTask, operation);
@@ -152,18 +171,20 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'] } = 
     },
     async continue(currentTask, instruction, operation) {
       this.calls.push({ tool: 'antigravity_continue', task_id: currentTask.task_id, instruction });
+      if (settingsPath) permissionObservations.push({ phase: 'continue', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
       await writeFile(path.join(workspace, 'test_demo.py'), 'assert True\n# lowercase input coverage\n');
       this.lastResult = resultFor(currentTask, operation);
       return this.lastResult;
     },
     async result(currentTask) {
       this.resultCalls += 1;
+      if (settingsPath) permissionObservations.push({ phase: 'result', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
       return this.resultOverride ?? this.lastResult ?? resultFor(currentTask, null);
     }
   };
   const options = { taskPath, config, owner: 'fixture-owner', worker, reviewerInvoker: reviewer };
   return {
-    root, id, base, workspace, worktreeRoot, taskPath, controlPath, config, worker, reviewerCalls, options,
+    root, id, base, workspace, worktreeRoot, taskPath, controlPath, config, worker, reviewerCalls, permissionObservations, settingsPath, gateObservationPath, options,
     async cleanup() { await rm(root, { recursive: true, force: true }); }
   };
 }
@@ -312,6 +333,70 @@ test('MCP abstraction dispatches, captures untracked files, and does not commit'
   assert.equal(packet.review_result.verdict, 'PASS');
 });
 
+test('temporary write permissions exist only during execute/continue and are gone before gates and review', async t => {
+  const f = await fixture({ temporaryPermissions: true });
+  t.after(f.cleanup);
+  const originalSettings = await readFile(f.settingsPath);
+  const rules = f.config.worker.temporary_permissions.files.map(file => `write_file(${path.resolve(file)})`);
+
+  const first = await runHarnessLifecycle(f.options);
+  assert.equal(first.status, 'WAITING_FOR_CHECKPOINT');
+  assert.deepEqual(f.permissionObservations.map(item => item.phase), ['execute', 'review']);
+  assert.deepEqual(f.permissionObservations[0].allow, rules);
+  assert.deepEqual(f.permissionObservations[1].allow, []);
+  assert.equal(await readFile(f.gateObservationPath, 'utf8'), '[]');
+  assert.deepEqual(await readFile(f.settingsPath), originalSettings);
+
+  await requestChanges({ ...f.options, instruction: 'bounded change' });
+  const continued = await continueHarnessLifecycle({ ...f.options, instruction: 'bounded change' });
+  assert.equal(continued.status, 'WAITING_FOR_CHECKPOINT');
+  assert.deepEqual(f.permissionObservations.map(item => item.phase), ['execute', 'review', 'continue', 'review']);
+  assert.deepEqual(f.permissionObservations[2].allow, rules);
+  assert.deepEqual(f.permissionObservations[3].allow, []);
+  assert.deepEqual(await readFile(f.settingsPath), originalSettings);
+});
+
+test('invalid temporary permission scope stops before worker dispatch', async t => {
+  const f = await fixture({ temporaryPermissions: true });
+  t.after(f.cleanup);
+  f.config.worker.temporary_permissions.files = [path.join(f.root, 'outside.txt')];
+
+  await assert.rejects(
+    () => runHarnessLifecycle(f.options),
+    error => error?.code === 'SCOPE_VIOLATION'
+  );
+  assert.equal(f.worker.calls.length, 0);
+  assert.equal(f.reviewerCalls.length, 0);
+});
+
+test('permission cleanup mutation blocks gates and review after worker completion', async t => {
+  const f = await fixture({ temporaryPermissions: true });
+  t.after(f.cleanup);
+  const originalExecute = f.worker.execute.bind(f.worker);
+  f.worker.execute = async (...args) => {
+    const result = await originalExecute(...args);
+    const settings = JSON.parse(await readFile(f.settingsPath, 'utf8'));
+    settings.marker = 'concurrent-change';
+    await writeFile(f.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return result;
+  };
+
+  await assert.rejects(
+    () => runHarnessLifecycle(f.options),
+    error => error?.code === 'CONTROL_STATE_MUTATED'
+  );
+  assert.equal(f.worker.calls.length, 1);
+  assert.equal(f.reviewerCalls.length, 0);
+  await assert.rejects(() => access(f.gateObservationPath), error => error?.code === 'ENOENT');
+  assert.equal(JSON.parse(await readFile(f.settingsPath, 'utf8')).marker, 'concurrent-change');
+  const state = JSON.parse(await readFile(path.join(f.workspace, '.workflow-local', f.id, 'state.json'), 'utf8'));
+  assert.equal(state.error.code, 'CONTROL_STATE_MUTATED');
+  assert.equal(state.latest_execution.status, 'SUCCEEDED');
+  const replay = await runHarnessLifecycle(f.options);
+  assert.equal(replay.status, 'FAILED');
+  assert.equal(f.worker.calls.length, 1);
+});
+
 test('lifecycle preserves unknown sandbox and bounded redacted worker evidence', async t => {
   const f = await fixture();
   t.after(f.cleanup);
@@ -386,7 +471,7 @@ test('no-op rework is blocked with an auditable error instead of leaving RUNNING
 });
 
 test('max rework is enforced and does not loop', async t => {
-  const f = await fixture({ maxRework: 1, reviewerVerdicts: ['PASS', 'NEEDS_FIX'] });
+  const f = await fixture({ maxRework: 1, reviewerVerdicts: ['PASS', 'NEEDS_FIX'], temporaryPermissions: true });
   t.after(f.cleanup);
   await runHarnessLifecycle(f.options);
   await requestChanges({ ...f.options, instruction: 'one bounded change' });
@@ -394,6 +479,7 @@ test('max rework is enforced and does not loop', async t => {
   assert.equal(result.status, 'RETRY_EXHAUSTED');
   assert.equal(result.rework_count, 2);
   assert.equal(f.worker.calls.length, 2);
+  assert.deepEqual(JSON.parse(await readFile(f.settingsPath, 'utf8')).permissions.allow, []);
 });
 
 test('lost lease prevents continue without calling MCP', async t => {
@@ -556,7 +642,7 @@ test('conversation loss requires explicit recovery and never starts a new conver
 });
 
 test('reconcile uses antigravity_result and does not execute again', async t => {
-  const f = await fixture();
+  const f = await fixture({ temporaryPermissions: true });
   t.after(f.cleanup);
   await runHarnessLifecycle(f.options);
   const statePath = path.join(f.workspace, '.workflow-local', f.id, 'state.json');
@@ -577,6 +663,7 @@ test('reconcile uses antigravity_result and does not execute again', async t => 
   const reconciled = await reconcileTask(f.options);
   assert.equal(reconciled.status, 'READY_FOR_REVIEW');
   assert.equal(f.worker.calls.length, 1);
+  assert.deepEqual(f.permissionObservations.at(-1), { phase: 'result', allow: [] });
 });
 
 test('completion receipt, audit and read-only inspection are durable and replayable', async t => {
