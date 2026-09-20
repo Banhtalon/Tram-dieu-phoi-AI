@@ -10,8 +10,8 @@ Bạn quyết định cách ứng dụng hoạt động, đăng nhập khi cần
 
 ## Luồng hiện tại
 
-Bản `10.1.0-rc.2` có cầu nối CLI tuần tự cho worker Google qua Antigravity (`agy`) và
-reviewer/senior qua Codex CLI. Task mới dùng Controlled Delegation V1 theo mặc định; V2
+Bản `10.1.0-rc.2` có cầu nối CLI tuần tự cho worker và reviewer Gemini qua Antigravity
+(`agy`); senior vẫn qua Codex CLI. Task mới dùng Controlled Delegation V1 theo mặc định; V2
 là tuyến tùy chọn với worker Gemini, Luna dự phòng, receipt requested-versus-observed và
 báo cáo trạng thái fallback. Kết quả `pilot`, `run` và `resume` có sẵn bản Owner và
 Lead trong JSON tại checkpoint báo cáo.

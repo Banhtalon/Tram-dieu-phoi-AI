@@ -15,7 +15,8 @@ Binding đọc nhanh của V2:
 | Lead | `gpt-5.6-sol` | `medium` |
 | Worker chính | `gemini-3.8-flash-high` | — |
 | Worker dự phòng | `gpt-5.6-luna` | `max` |
-| Reviewer thông thường | `gpt-5.6-terra` | `xhigh` |
+| Reviewer thông thường | `gemini-3.8-flash-high` qua Antigravity agent `tools: []` | — |
+| Reviewer dự phòng | `gpt-5.6-terra` | `xhigh`, chỉ khi Gemini không gọi được |
 | Senior | `gpt-5.6-sol` | `medium` |
 | Reviewer rủi ro cao | `gpt-5.6-sol` | `medium` |
 

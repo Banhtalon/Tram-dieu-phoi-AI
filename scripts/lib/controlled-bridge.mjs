@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync, lstatSync, readFileSync } from 'node
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { git, cleanHead, readJson, writeJson } from './workflow.mjs';
-import { invoke, doctor } from './bridge-adapters.mjs';
+import { invoke, doctor, validateReviewerBinding } from './bridge-adapters.mjs';
 import { acquire, atomicJson, sourceAllowed, applyPreflight } from './bridge.mjs';
 import { runRedacted, looksLikeSecretArgument, redactText } from './redact.mjs';
 import { verifyReceiptChain, normalizeUsage } from './receipts.mjs';
@@ -474,23 +474,31 @@ export function validateControlledConfig(c, taskPolicy = null) {
   if (!c.reviewer || typeof c.reviewer !== 'object') {
     throw Error('reviewer binding required');
   }
-  if (isV2) {
-    if (c.reviewer.provider !== 'openai') {
-      throw Error(`reviewer provider must be 'openai', got '${c.reviewer.provider}'`);
-    }
+  if (
+    isV2 &&
+    c.reviewer.provider !== 'openai' &&
+    !(c.reviewer.provider === 'google' && c.reviewer.cli === 'antigravity')
+  ) {
+    throw Error(`reviewer provider must be 'openai' or guarded 'google/antigravity', got '${c.reviewer.provider}'`);
   }
+  validateReviewerBinding(c.reviewer);
   const normReviewerModel = normalizeModelName(c.reviewer.model);
-  if (isV2) {
-    if (normReviewerModel !== TERRA_MODEL) {
-      throw Error(`normal reviewer model must be '${TERRA_MODEL}', got '${c.reviewer.model}'`);
+  const isGeminiReviewer = c.reviewer.provider === 'google' && c.reviewer.cli === 'antigravity';
+  if (isGeminiReviewer) {
+    if (normReviewerModel !== GEMINI_MODEL || c.reviewer.effort != null) {
+      throw Error(`Antigravity reviewer must use '${GEMINI_MODEL}' without an effort override`);
     }
   } else {
-    if (normReviewerModel !== 'terra') {
+    if (isV2) {
+      if (normReviewerModel !== TERRA_MODEL) {
+        throw Error(`normal reviewer model must be '${TERRA_MODEL}', got '${c.reviewer.model}'`);
+      }
+    } else if (normReviewerModel !== 'terra') {
       throw Error(`normal reviewer model must be 'terra', got '${c.reviewer.model}'`);
     }
-  }
-  if (c.reviewer.effort?.toLowerCase() !== 'xhigh') {
-    throw Error(`normal reviewer effort must be 'xhigh', got '${c.reviewer.effort}'`);
+    if (c.reviewer.effort?.toLowerCase() !== 'xhigh') {
+      throw Error(`normal reviewer effort must be 'xhigh', got '${c.reviewer.effort}'`);
+    }
   }
 
   if (isV2) {
@@ -2659,7 +2667,7 @@ export async function validateControlledAcceptedPilot(config, pilotDir, { requir
     if (!review.classifier_sha256 && !review.classifier) throw Error('fast_waiver missing classifier hash');
     if (!Array.isArray(review.reasons) || !review.reasons.length) throw Error('fast_waiver missing explicit reasons');
   } else {
-    // NORMAL or ELEVATED: require real Google worker plus independent OpenAI reviewer
+    // NORMAL or ELEVATED: require a real Google worker plus an independent reviewer.
     if (review.schema_version !== 'qq.workflow.review.v10') throw Error('pilot review schema invalid');
     if (review.task_id !== t.task_id || review.revision !== t.revision) throw Error('review task mismatch');
     if (review.contract_sha256 !== t.contract_sha256) throw Error('review contract mismatch');
@@ -2671,11 +2679,12 @@ export async function validateControlledAcceptedPilot(config, pilotDir, { requir
     }
 
     const reviewerRole = t.risk === 'ELEVATED' ? 'elevated_reviewer' : 'reviewer';
-    if (config[reviewerRole]?.provider !== 'openai') {
-      throw Error(`independent OpenAI reviewer required in config for ${reviewerRole}`);
+    const reviewerProvider = config[reviewerRole]?.provider;
+    if (!['openai', 'google'].includes(reviewerProvider)) {
+      throw Error(`independent reviewer provider required in config for ${reviewerRole}`);
     }
-    if (typeof review.reviewer_session !== 'string' || !review.reviewer_session.startsWith('openai:')) {
-      throw Error('independent OpenAI reviewer session required');
+    if (typeof review.reviewer_session !== 'string' || !review.reviewer_session.startsWith(`${reviewerProvider}:`)) {
+      throw Error(`independent ${reviewerProvider} reviewer session required`);
     }
     const workerSessions = [receipt.observed_by_bridge?.session_id, receipt.reported_by_provider?.session_id].filter(Boolean);
     if (workerSessions.some(session => review.reviewer_session === session ||

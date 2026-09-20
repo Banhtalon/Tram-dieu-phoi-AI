@@ -1,11 +1,59 @@
 import path from 'node:path';
-import {writeFile,mkdir,readFile} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
+import {writeFile,mkdir,readFile,lstat} from 'node:fs/promises';
+import {randomUUID,createHash} from 'node:crypto';
 import os from 'node:os';
 import {execute,subscriptionEnv,failureReason,failureStatus,safe} from './bridge-process.mjs';
 import {beginInvocation,finishInvocation} from './receipts.mjs';
 
 export const resultSchema={type:'object',additionalProperties:false,required:['verdict','summary','material_findings','risk_checks_completed'],properties:{verdict:{type:'string',enum:['PASS','NEEDS_FIX','BLOCKED']},summary:{type:'string'},material_findings:{type:'array',items:{type:'string'}},risk_checks_completed:{type:'boolean'}}};
+const GEMINI_REVIEWER_MODEL='gemini-3.8-flash-high';
+const AGENT_NAME=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const DEFINITION_HASH=/^[a-f0-9]{64}$/i;
+const definitionHash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const agentDefinitionPath=agent=>path.join(os.homedir(),'.gemini','config','agents',agent,'agent.md');
+
+export function validateNoToolsAgentDefinition(source,agent) {
+  if(typeof source!=='string'||!AGENT_NAME.test(agent??''))return false;
+  const required=[
+    /^name:\s*[^\r\n]+$/m,
+    /^tools:\s*\[\]\s*$/m,
+    /^excludeDefaultComponents:\s*true\s*$/m,
+    /^inheritCustomizations:\s*false\s*$/m,
+    /^mainAgent:\s*true\s*$/m,
+    /^subagent:\s*false\s*$/m,
+    /^commandExecutionPolicy:\s*off\s*$/m,
+    /^mcpServers:\s*\[\]\s*$/m
+  ];
+  return required.every(pattern=>pattern.test(source))&&new RegExp(`^name:\\s*${agent.replace(/[.*+?^${}()|[\\]\\]/g,'\\$&')}\\s*$`,'m').test(source);
+}
+
+export function validateReviewerBinding(binding) {
+  const b=validateBinding(binding);
+  if(b.provider==='google'&&b.cli==='antigravity') {
+    if(b.model!==GEMINI_REVIEWER_MODEL)throw Error(`Antigravity reviewer model must be '${GEMINI_REVIEWER_MODEL}'`);
+    if(b.effort!=null)throw Error('Antigravity reviewer does not accept an effort override');
+    if(!AGENT_NAME.test(b.agent??''))throw Error('Antigravity reviewer requires a safe agent name');
+    if(!DEFINITION_HASH.test(b.agent_definition_sha256??''))throw Error('Antigravity reviewer requires agent_definition_sha256');
+  }
+  return b;
+}
+
+async function verifyAntigravityReviewerAgent(binding) {
+  const file=agentDefinitionPath(binding.agent);
+  const info=await lstat(file);
+  if(!info.isFile()||info.isSymbolicLink())throw Error('Antigravity reviewer agent definition must be a regular file');
+  const bytes=await readFile(file);
+  if(definitionHash(bytes).toLowerCase()!==binding.agent_definition_sha256.toLowerCase())throw Error('Antigravity reviewer agent definition hash mismatch');
+  if(!validateNoToolsAgentDefinition(bytes.toString('utf8'),binding.agent))throw Error('Antigravity reviewer agent must explicitly disable tools and customizations');
+  return {path:file,sha256:definitionHash(bytes)};
+}
+
+export function antigravityReviewerArgs(binding,prompt,timeoutSeconds=300) {
+  validateReviewerBinding(binding);
+  const seconds=Number.isFinite(timeoutSeconds)&&timeoutSeconds>0?timeoutSeconds:300;
+  return [...binding.command,'--agent',binding.agent,'--model',binding.model,'--sandbox','--mode','plan','--disable-slash-commands','--output-format','stream-json','--print-timeout',`${seconds}s`,'--print',prompt];
+}
+
 export function validateBinding(b) {
   if(!b||!['openai','google'].includes(b.provider)||!Array.isArray(b.command)||!b.command.length||b.command.some(x=>typeof x!=='string'||!x)||!/^[-a-zA-Z0-9_.]+$/.test(b.model??''))throw Error('invalid CLI binding');
   if(b.command.length>2||(b.command.length===2&&(!/node(?:\.exe)?$/i.test(b.command[0])||! /\.(?:mjs|cjs|js)$/i.test(b.command[1]))))throw Error('binding must be executable or node entry point');
@@ -14,15 +62,18 @@ export function validateBinding(b) {
   if(b.provider==='openai'&&b.cli!=null&&b.cli!=='codex')throw Error('invalid OpenAI CLI');
   return b;
 }
-export async function invocation(binding,{cwd,packetDir,role,prompt}) {
+export async function invocation(binding,{cwd,packetDir,role,prompt,timeoutSeconds}) {
   const b=validateBinding(binding),env=subscriptionEnv();await mkdir(packetDir,{recursive:true});
   if(b.provider==='openai'){
     const schema=path.join(packetDir,'result-schema.json');await writeFile(schema,JSON.stringify(resultSchema));
     const args=[...b.command,'exec','--ignore-user-config','-c','forced_login_method="chatgpt"','-c','model_provider="openai"','-c','approval_policy="never"','-m',b.model,'-s',role==='worker'||role==='senior'?'workspace-write':'read-only','--json','--output-schema',schema,'-C',cwd];
     if(b.effort)args.push('-c',`model_reasoning_effort="${b.effort}"`);args.push('-');return {argv:args,env,input:prompt};
   }
+  if(b.cli==='antigravity'&&((role==='reviewer'||role==='elevated_reviewer')||(role==='probe'&&b.agent))) {
+    validateReviewerBinding(b);await verifyAntigravityReviewerAgent(b);
+    return {argv:antigravityReviewerArgs(b,prompt,timeoutSeconds),env,input:''};
+  }
   if(b.cli!=='gemini'){
-    if(role==='reviewer'||role==='elevated_reviewer')throw Error('Antigravity plan is not a read-only permission boundary; configure Codex reviewer');
     const settingsPath=path.join(os.homedir(),'.gemini','antigravity-cli','settings.json');const settings=JSON.parse(await readFile(settingsPath,'utf8'));
     if(settings.useG1Credits===undefined){settings.useG1Credits=false;await writeFile(settingsPath,JSON.stringify(settings,null,2)+'\n');}assertSubscriptionSettings(settings);
     const schema=path.join(packetDir,'result-schema.json');await writeFile(schema,JSON.stringify(resultSchema));

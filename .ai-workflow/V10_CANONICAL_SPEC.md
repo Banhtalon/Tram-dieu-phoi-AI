@@ -134,14 +134,18 @@ not to another approval attempt without implementation repair.
 Tasks adopting versioned schema `qq.workflow.task.v10.1` may declare
 `execution.policy=CONTROLLED_DELEGATION_V1` or `execution.policy=CONTROLLED_DELEGATION_V2`.
 This policy family is subscription-only.
-The V1 policy uses a designated Gemini 3.8 Flash High worker, an independent Terra Xhigh ordinary
-reviewer, and exactly `gpt-6-astra` at low effort for senior escalation or elevated
-review. Astra never escalates to Astra; an unavailable elevated reviewer returns
-WAIT/STOP and never falls back to Terra.
+The V1 policy uses a designated Gemini 3.8 Flash High worker, an independent ordinary
+reviewer bound to Gemini 3.8 Flash High through a guarded Antigravity no-tools agent,
+and exactly `gpt-6-astra` at low effort for senior escalation or elevated review.
+Terra Xhigh is an explicit reviewer fallback only when the Gemini reviewer cannot be
+invoked; Gemini findings never trigger that fallback. Astra never escalates to Astra;
+an unavailable elevated reviewer returns WAIT/STOP and never falls back to Terra.
 The V2 policy preserves verification quality while conserving Codex tokens: it uses Sol Medium as
 Lead, Gemini 3.8 Flash High as primary survey/implementation/test/repair worker, GPT-5.6 Luna Max
-as standby fallback worker, GPT-5.6 Terra Xhigh as independent ordinary reviewer, GPT-5.6 Sol Medium
-as senior, and a fresh independent GPT-5.6 Sol Medium session as elevated reviewer. Lead and senior
+as standby fallback worker, Gemini 3.8 Flash High through a guarded Antigravity no-tools agent as
+independent ordinary reviewer, GPT-5.6 Terra Xhigh as the explicit reviewer fallback only when
+Gemini cannot be invoked, GPT-5.6 Sol Medium as senior, and a fresh independent GPT-5.6 Sol Medium
+session as elevated reviewer. Lead and senior
 participants cannot serve as reviewer for that feature. Model IDs and reasoning effort are verified
 via CLI and cannot be substituted silently. V2 allocates one initial worker attempt plus four shared
 repair rounds between Gemini and Luna. Fallback from Gemini to Luna is permitted exclusively on

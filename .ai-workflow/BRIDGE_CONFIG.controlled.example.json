@@ -12,11 +12,12 @@
     "model": "gemini-3.8-flash-high"
   },
   "reviewer": {
-    "provider": "openai",
-    "cli": "codex",
-    "command": ["codex"],
-    "model": "terra",
-    "effort": "xhigh"
+    "provider": "google",
+    "cli": "antigravity",
+    "command": ["agy"],
+    "model": "gemini-3.8-flash-high",
+    "agent": "ag-reviewer-010-negative",
+    "agent_definition_sha256": "6c913480db28710d872f54ba60fbeb6bf1373130bdb76b75f7c12994d1d5b65f"
   },
   "senior": {
     "provider": "openai",

@@ -2,7 +2,7 @@ import path from 'node:path';
 import {mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
 import {randomUUID,createHash} from 'node:crypto';
 import {git,cleanHead,readJson,writeJson,assertContract,verify,readiness,executionRoute} from './workflow.mjs';
-import {invoke,doctor,validateBinding} from './bridge-adapters.mjs';
+import {invoke,doctor,validateBinding,validateReviewerBinding} from './bridge-adapters.mjs';
 import {safe} from './bridge-process.mjs';
 import {redactText,secretEnvironmentValues} from './redact.mjs';
 
@@ -45,8 +45,9 @@ export function validateConfig(c) {
     }
   }
   for(const role of ['worker','reviewer','senior'])validateBinding(c[role]);
+  validateReviewerBinding(c.reviewer);
   if(c.elevated_reviewer){validateBinding(c.elevated_reviewer);required(c.elevated_reviewer.provider==='openai'||c.elevated_reviewer.cli==='gemini','elevated reviewer must support read-only execution');}
-  required(c.reviewer.provider==='openai'||c.reviewer.cli==='gemini','Antigravity supports worker only; configure a read-only Codex reviewer');
+  required(c.reviewer.provider==='openai'||c.reviewer.cli==='gemini'||(c.reviewer.provider==='google'&&c.reviewer.cli==='antigravity'),'reviewer must use Codex, Gemini CLI, or guarded Antigravity');
   return c;
 }
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
