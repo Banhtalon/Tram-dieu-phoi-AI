@@ -35,7 +35,7 @@ import {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 let serial = 0;
 
-async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false } = {}) {
+async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qq-harness-lifecycle-'));
   git(root, 'init');
   git(root, 'config', 'user.email', 'harness-test@example.invalid');
@@ -85,7 +85,6 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
     contract_sha256: null
   };
   await writeFile(taskPath, JSON.stringify(task, null, 2) + '\n');
-  await freezeControlledTask(taskPath, task);
 
   const controlPath = path.join(root, '.workflow-local', 'ai-control.desired_state');
   await mkdir(path.dirname(controlPath), { recursive: true });
@@ -126,6 +125,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
       files: [path.join(workspace, 'demo.py'), path.join(workspace, 'test_demo.py')]
     };
   }
+  await freezeControlledTask(taskPath, task, bindConfig ? config : null);
   const reviewerCalls = [];
   const reviewer = async ({ state }) => {
     if (settingsPath) permissionObservations.push({ phase: 'review', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
@@ -356,14 +356,101 @@ test('temporary write permissions exist only during execute/continue and are gon
   assert.deepEqual(await readFile(f.settingsPath), originalSettings);
 });
 
-test('invalid temporary permission scope stops before worker dispatch', async t => {
+test('frozen temporary permission config rejects enabled, settingsPath and files changes before settings or worker access', async t => {
+  const scenarios = [
+    {
+      name: 'enabled',
+      mutate: f => { f.config.worker.temporary_permissions.enabled = false; }
+    },
+    {
+      name: 'settingsPath',
+      mutate: async f => {
+        const alternate = path.join(f.root, 'alternate-settings.json');
+        await writeFile(alternate, await readFile(f.settingsPath));
+        f.config.worker.temporary_permissions.settingsPath = alternate;
+      }
+    },
+    {
+      name: 'files',
+      mutate: f => { f.config.worker.temporary_permissions.files = [path.join(f.workspace, 'demo.py')]; }
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const f = await fixture({ temporaryPermissions: true });
+    t.after(f.cleanup);
+    const before = await readFile(f.settingsPath);
+    await scenario.mutate(f);
+    await assert.rejects(
+      () => runHarnessLifecycle(f.options),
+      error => error?.code === 'CONFIG_MISMATCH',
+      scenario.name
+    );
+    assert.equal(f.worker.calls.length, 0, scenario.name);
+    assert.equal(f.reviewerCalls.length, 0, scenario.name);
+    assert.deepEqual(await readFile(f.settingsPath), before, scenario.name);
+  }
+});
+
+test('temporary permission opt-in requires a frozen config binding and guards continue and reconcile', async t => {
+  const unbound = await fixture({ temporaryPermissions: true, bindConfig: false });
+  t.after(unbound.cleanup);
+  const unboundSettings = await readFile(unbound.settingsPath);
+  await assert.rejects(
+    () => runHarnessLifecycle(unbound.options),
+    error => error?.code === 'CONFIG_MISMATCH'
+  );
+  assert.equal(unbound.worker.calls.length, 0);
+  assert.deepEqual(await readFile(unbound.settingsPath), unboundSettings);
+
+  const continued = await fixture({ temporaryPermissions: true });
+  t.after(continued.cleanup);
+  await runHarnessLifecycle(continued.options);
+  await requestChanges({ ...continued.options, instruction: 'bounded change' });
+  const changedSettingsPath = path.join(continued.root, 'changed-settings.json');
+  await writeFile(changedSettingsPath, await readFile(continued.settingsPath));
+  continued.config.worker.temporary_permissions.settingsPath = changedSettingsPath;
+  await assert.rejects(
+    () => continueHarnessLifecycle({ ...continued.options, instruction: 'bounded change' }),
+    error => error?.code === 'CONFIG_MISMATCH'
+  );
+  assert.equal(continued.worker.calls.length, 1);
+
+  const reconciled = await fixture({ temporaryPermissions: true });
+  t.after(reconciled.cleanup);
+  await runHarnessLifecycle(reconciled.options);
+  const statePath = path.join(reconciled.workspace, '.workflow-local', reconciled.id, 'state.json');
+  const state = JSON.parse(await readFile(statePath, 'utf8'));
+  state.phase = 'RECOVERY_REQUIRED';
+  state.status = 'RECOVERY_REQUIRED';
+  state.in_flight = {
+    id: state.latest_execution.operation_id,
+    idempotency_key: state.latest_execution.operation_id,
+    kind: state.latest_execution.invocation_kind,
+    invocation_kind: state.latest_execution.invocation_kind,
+    attempt: state.latest_execution.attempt,
+    rework_count: state.latest_execution.rework_count,
+    started_at: state.updated_at
+  };
+  state.recovery = { required: true, reason: 'config binding test' };
+  reconciled.worker.resultOverride = reconciled.worker.lastResult;
+  await writeFile(statePath, JSON.stringify(state, null, 2) + '\n');
+  reconciled.config.worker.temporary_permissions.files = [path.join(reconciled.workspace, 'demo.py')];
+  await assert.rejects(
+    () => reconcileTask(reconciled.options),
+    error => error?.code === 'CONFIG_MISMATCH'
+  );
+  assert.equal(reconciled.worker.resultCalls, 0);
+});
+
+test('changed temporary permission scope stops before worker dispatch', async t => {
   const f = await fixture({ temporaryPermissions: true });
   t.after(f.cleanup);
   f.config.worker.temporary_permissions.files = [path.join(f.root, 'outside.txt')];
 
   await assert.rejects(
     () => runHarnessLifecycle(f.options),
-    error => error?.code === 'SCOPE_VIOLATION'
+    error => error?.code === 'CONFIG_MISMATCH'
   );
   assert.equal(f.worker.calls.length, 0);
   assert.equal(f.reviewerCalls.length, 0);

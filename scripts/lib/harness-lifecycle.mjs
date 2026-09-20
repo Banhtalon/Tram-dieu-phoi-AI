@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import { acquire, atomicJson, sourceAllowed } from './bridge.mjs';
 import { git, readJson } from './workflow.mjs';
-import { assertControlledContract } from './controlled-bridge.mjs';
+import { assertControlledContract, controlledConfigHash } from './controlled-bridge.mjs';
 import { runRedacted } from './redact.mjs';
 import { invoke, validateBinding } from './bridge-adapters.mjs';
 import { AntigravityMcpWorker, assertWorkerIsolation, boundedEvidence } from './implementation-worker.mjs';
@@ -218,6 +218,30 @@ async function loadTask(taskPath, operation = 'load-task') {
     if (error instanceof SyntaxError) throw fail('STATE_CORRUPTION', 'task packet is not valid JSON', { operation });
     throw error;
   }
+}
+
+async function assertLifecycleConfigBinding(taskPath, task, sourceConfig) {
+  const lock = await assertControlledContract(taskPath, task);
+  const bindings = [
+    ['task.execution.config_sha256', task.execution?.config_sha256],
+    ['task.config_sha256', task.config_sha256],
+    ['lock.config_sha256', lock.config_sha256]
+  ].filter(([, value]) => value !== undefined && value !== null);
+  const temporaryPermissions = sourceConfig?.worker?.temporary_permissions;
+  if (temporaryPermissions !== undefined && (task.config_sha256 == null || lock.config_sha256 == null)) {
+    throw fail('CONFIG_MISMATCH', 'temporary permissions require a frozen configuration hash binding', { task_id: task.task_id });
+  }
+  if (!bindings.length) return lock;
+  if (!sourceConfig || typeof sourceConfig !== 'object' || Array.isArray(sourceConfig)) {
+    throw fail('CONFIG_MISMATCH', 'frozen configuration hash cannot be checked against a missing config', { task_id: task.task_id });
+  }
+  const configHash = controlledConfigHash(sourceConfig);
+  for (const [name, expected] of bindings) {
+    if (expected !== configHash) {
+      throw fail('CONFIG_MISMATCH', `${name} does not match config hash (${configHash})`, { task_id: task.task_id });
+    }
+  }
+  return lock;
 }
 
 async function optionalJson(file) {
@@ -1388,9 +1412,9 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
 }
 
 export async function runHarnessLifecycle(options = {}) {
-  const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'run');
-  await assertControlledContract(options.taskPath, task);
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
+  const config = lifecycleConfig(options.config);
   const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
   await mkdir(paths.packetDir, { recursive: true });
   let state = await stateFor(paths);
@@ -1518,9 +1542,9 @@ export async function requestChanges(options = {}) {
 }
 
 export async function continueHarnessLifecycle(options = {}) {
-  const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'continue');
-  await assertControlledContract(options.taskPath, task);
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
+  const config = lifecycleConfig(options.config);
   const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
   const state = await stateFor(paths);
   if (!state) throw fail('STATE_MISSING', 'lifecycle state is missing');
@@ -1699,8 +1723,9 @@ export async function recoverTask(options = {}) {
 }
 
 export async function reconcileTask(options = {}) {
-  const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'reconcile');
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
+  const config = lifecycleConfig(options.config);
   const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
   const state = await stateFor(paths);
   if (!state) throw fail('STATE_MISSING', 'lifecycle state is missing');
