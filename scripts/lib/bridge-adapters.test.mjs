@@ -79,11 +79,17 @@ test('Gemini reviewer requires the pinned agent digest', () => {
   assert.throws(() => validateReviewerBinding({ ...binding, effort: 'xhigh' }), /does not accept an effort override/);
 });
 
-test('subscription settings require an explicit default-account contract', () => {
+test('subscription settings honor the documented default-account contract', () => {
+  assert.doesNotThrow(() => assertSubscriptionSettings({}));
   assert.doesNotThrow(() => assertSubscriptionSettings({ useG1Credits: false }));
-  assert.throws(() => assertSubscriptionSettings({}), /explicit useG1Credits=false/);
-  assert.throws(() => assertSubscriptionSettings({ useG1Credits: true }), /explicit useG1Credits=false/);
-  assert.throws(() => assertSubscriptionSettings({ useG1Credits: false, modelProvider: 'api' }), /modelProvider/);
+  for (const value of [true, null, undefined, 'false', 0, {}, []]) {
+    assert.throws(() => assertSubscriptionSettings({ useG1Credits: value }), /useG1Credits/);
+  }
+  for (const key of ['modelProvider', 'apiKey', 'apiKeyEnv', 'baseUrl', 'endpoint']) {
+    assert.throws(() => assertSubscriptionSettings({ [key]: 'override' }), new RegExp(key));
+  }
+  assert.throws(() => assertSubscriptionSettings(null), /JSON object/);
+  assert.throws(() => assertSubscriptionSettings([]), /JSON object/);
 });
 
 const reviewJson = JSON.stringify({ verdict: 'PASS', summary: 'ok', material_findings: [], risk_checks_completed: true });

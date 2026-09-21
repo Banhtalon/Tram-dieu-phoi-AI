@@ -58,8 +58,9 @@ Agent reviewer mẫu nằm tại `.ai-workflow/agents/ag-reviewer-011-r1/agent.m
 Antigravity, tạo đúng tên agent nếu chưa tồn tại, không ghi đè agent có sẵn, rồi kiểm tra
 SHA-256 `ef23a4c0616a77d1d5b982c02ea07ec281c00de5d86aaa42523714b0678bdaea` khớp
 `agent_definition_sha256` trong config. Bridge chỉ gọi reviewer sau khi kiểm tra file regular,
-frontmatter no-tools, agent/model quan sát được và settings subscription; `useG1Credits` thiếu
-hoặc có provider/API override đều dừng fail-closed.
+frontmatter no-tools, agent/model quan sát được và settings subscription; `useG1Credits` nếu có
+phải là `false`, còn thiếu dùng mặc định `false` theo [tài liệu CLI chính thức](https://www.antigravity.google/docs/cli/reference/).
+Provider/API override vẫn dừng fail-closed.
 
 ## Ngữ cảnh review và dữ liệu test
 

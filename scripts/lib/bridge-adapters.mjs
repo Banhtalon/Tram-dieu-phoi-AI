@@ -98,7 +98,8 @@ export async function invocation(binding,{cwd,packetDir,role,prompt,timeoutSecon
 }
 
 export function assertSubscriptionSettings(settings){
-  if(!settings||typeof settings!=='object'||Array.isArray(settings)||!Object.hasOwn(settings,'useG1Credits')||settings.useG1Credits!==false)throw Error('Antigravity requires explicit useG1Credits=false; missing is not an approved subscription setting');
+  if(!settings||typeof settings!=='object'||Array.isArray(settings))throw Error('Antigravity requires a JSON object for subscription settings');
+  if(Object.hasOwn(settings,'useG1Credits')&&settings.useG1Credits!==false)throw Error('Antigravity requires useG1Credits=false when present; missing uses the documented default');
   for(const key of ['modelProvider','apiKey','apiKeyEnv','baseUrl','endpoint'])if(Object.hasOwn(settings,key))throw Error(`Antigravity forbids explicit ${key}; use the default subscription account`);
 }
 
