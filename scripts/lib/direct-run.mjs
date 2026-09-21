@@ -1,0 +1,194 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdir, readFile, writeFile, realpath, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as lifecycle from './harness-lifecycle.mjs';
+import { freezeControlledTask, assertControlledContract, controlledConfigHash, validateControlledTask } from './controlled-bridge.mjs';
+import { assertSubscriptionSettings, validateReviewerBinding, validateNoToolsAgentDefinition } from './bridge-adapters.mjs';
+import { assertWorkerIsolation } from './implementation-worker.mjs';
+import { auditSummary } from './harness-observability.mjs';
+
+const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
+const json = async file => JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const git = (repo, ...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true }).trim();
+const writeNew = async (file, value) => writeFile(file, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+const requireValue = (ok, code) => { if (!ok) throw Object.assign(Error(code), { code }); };
+const inside = (root, file) => { const rel = path.relative(root, file); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
+const errorCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code ?? '') ? error.code : 'DIRECT_RUN_FAILED';
+
+// One host/account writer at a time, as required by the temporary-permissions helper.
+export async function prepareDirect(repo, task, config, output) {
+  repo = path.resolve(repo); output = path.resolve(output);
+  validateControlledTask(task);
+  requireValue(/^TASK-[A-Z0-9_-]+$/i.test(task.task_id), 'INVALID_TASK_ID');
+  requireValue(git(repo, 'rev-parse', '--show-toplevel').toLowerCase() === repo.replaceAll('\\', '/').toLowerCase(), 'REPO_ROOT_REQUIRED');
+  requireValue(path.dirname(path.resolve(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))).toLowerCase() === repo.toLowerCase(), 'MAIN_CHECKOUT_REQUIRED');
+  requireValue(git(repo, 'rev-parse', 'HEAD') === task.base_sha, 'BASE_MISMATCH');
+  config = structuredClone(config);
+  requireValue(!config.test_mode && config.worker?.local_trial === true, 'LOCAL_TRIAL_REQUIRED');
+  requireValue(config.worker.skip_permissions !== true && config.billing === 'SUBSCRIPTION_ONLY', 'UNSAFE_CONFIG');
+  requireValue(config.reviewer?.provider === 'google' && config.reviewer.model === 'gemini-3.8-flash-high', 'GEMINI_REVIEWER_REQUIRED');
+  requireValue(!config.fallback_reviewer, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
+  config.lifecycle = { ...config.lifecycle, max_rework: 2, checkpoint_required: true, control_root: output,
+    desired_state_path: '.workflow-local/ai-control.desired_state', lease_seconds: Math.min(3600, (config.timeout_seconds ?? 300) * 4 + 120) };
+  assertWorkerIsolation(config, { repoRoot: repo, controlRoot: output });
+  const root = path.join(repo, '.workflow-local', 'direct', task.task_id);
+  requireValue(!existsSync(root) && !existsSync(output), 'OUTPUT_EXISTS');
+  const taskPath = path.join(root, `${task.task_id}.json`);
+  const packetDir = path.join(output, task.task_id);
+  const helper = path.join(root, 'antigravity_server.py');
+  const helperBytes = await readFile(path.join(sourceRoot, 'mcp', 'antigravity_server.py'));
+  requireValue(config.worker.command?.length === 2, 'INVALID_WORKER_COMMAND');
+  config.worker.command[1] = helper;
+  const workspace = path.join(config.worker.local_trial_root, task.task_id);
+  const files = task.allowed_paths ?? task.write_paths;
+  assert.deepEqual([...files].sort(), [...config.write_paths].sort());
+  for (const file of files) requireValue(typeof file === 'string' && !path.isAbsolute(file) && !file.includes('\\') &&
+    !file.split('/').some(part => ['..', '.', '', '.git', '.workflow-local'].includes(part)) && inside(workspace, path.resolve(workspace, file)), 'SCOPE_ESCAPE');
+  config.worker.temporary_permissions = { enabled: true,
+    settingsPath: path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json'),
+    files: files.map(file => path.resolve(workspace, file)) };
+  await mkdir(root, { recursive: true }); await mkdir(output, { recursive: true });
+  requireValue((await realpath(root)).toLowerCase() === root.toLowerCase(), 'SYMLINK_CONTROL_PATH');
+  await writeFile(helper, helperBytes, { flag: 'wx' });
+  const control = path.join(repo, config.lifecycle.desired_state_path);
+  if (!existsSync(control)) await writeFile(control, 'running\n', { flag: 'wx' });
+  // Existing paused/stopped state is deliberately preserved.
+  await writeNew(taskPath, task);
+  await freezeControlledTask(taskPath, task, config);
+  const configPath = path.join(output, 'config.json');
+  await writeNew(configPath, config);
+  const manifest = { repo, taskPath, configPath, packetDir, helper_sha256: digest(helperBytes),
+    source_root: sourceRoot, source_head: git(sourceRoot, 'rev-parse', 'HEAD') };
+  await writeNew(path.join(output, 'prepared.json'), manifest);
+  return manifest;
+}
+
+export async function checkDirect(manifestPath) {
+  const m = await json(manifestPath), task = await json(m.taskPath), config = await json(m.configPath);
+  requireValue(inside(m.repo, m.taskPath), 'TASK_OUTSIDE_REPO');
+  requireValue(git(path.dirname(m.taskPath), 'rev-parse', '--show-toplevel').toLowerCase() === m.repo.replaceAll('\\', '/').toLowerCase(), 'TASK_REPO_MISMATCH');
+  requireValue(git(m.repo, 'rev-parse', 'HEAD') === task.base_sha, 'BASE_MISMATCH');
+  await assertControlledContract(m.taskPath, task);
+  requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
+  requireValue(config.lifecycle.max_rework === 2 && config.lifecycle.checkpoint_required === true && !config.fallback_reviewer, 'BUDGET_MISMATCH');
+  requireValue(config.worker.local_trial === true && !config.test_mode && !config.worker.skip_permissions, 'UNSAFE_CONFIG');
+  assertWorkerIsolation(config, { repoRoot: m.repo, controlRoot: path.dirname(manifestPath) });
+  requireValue((await lifecycle.readDesiredState(m.repo, config)).state === 'running', 'DESIRED_STATE_BLOCKED');
+  requireValue(!existsSync(path.join(m.packetDir, 'state.json')), 'EXISTING_RUN_REQUIRES_DECISION');
+  requireValue(!existsSync(path.join(path.dirname(path.resolve(manifestPath)), 'dispatch.json')), 'EXISTING_RUN_REQUIRES_DECISION');
+  requireValue(digest(await readFile(config.worker.command[1])) === m.helper_sha256, 'HELPER_CHANGED');
+  requireValue(m.helper_sha256 === digest(await readFile(path.join(sourceRoot, 'mcp', 'antigravity_server.py'))), 'HELPER_SOURCE_MISMATCH');
+  const settings = await json(config.worker.temporary_permissions.settingsPath);
+  assertSubscriptionSettings(settings);
+  requireValue(Array.isArray(settings.permissions?.allow), 'INVALID_PERMISSIONS');
+  requireValue(!config.worker.temporary_permissions.files.some(file => settings.permissions.allow.includes(`write_file(${file})`)), 'EXISTING_TASK_PERMISSION');
+  validateReviewerBinding(config.reviewer);
+  const agent = await readFile(path.join(os.homedir(), '.gemini', 'config', 'agents', config.reviewer.agent, 'agent.md'));
+  requireValue(digest(agent) === config.reviewer.agent_definition_sha256 && validateNoToolsAgentDefinition(agent.toString(), config.reviewer.agent), 'AGENT_MISMATCH');
+  // Resolve executables without invoking providers or spending a model call.
+  for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0]]) {
+    if (path.isAbsolute(executable)) await access(executable);
+    else execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [executable], { stdio: 'pipe', windowsHide: true });
+  }
+  return { manifest: m, task, config };
+}
+
+export async function runBounded(options, api = lifecycle) {
+  try {
+    const first = await api.runHarnessLifecycle(options);
+    if (first.status !== 'REQUEST_CHANGES') return first;
+    const instruction = first.requested_changes?.at(-1)?.instruction;
+    requireValue(typeof instruction === 'string' && instruction.length > 0, 'REPAIR_INSTRUCTION_MISSING');
+    return await api.continueHarnessLifecycle({ ...options, instruction:
+      `Use only file tools on the frozen allowed paths. Do not read/run gates, shell or control files; the controller runs tests.\n${instruction}` });
+  } finally { await api.closeLifecycleWorkers(); }
+}
+
+export async function runDirect(manifestPath, signal) {
+  const output = path.dirname(path.resolve(manifestPath)), runId = randomUUID();
+  const started = Date.now();
+  let prepared, rulesBefore;
+  let report = { schema_version: 'qq.direct-run.v1', run_id: runId, mode: 'live', status: 'BLOCKED', phase: 'preflight', provider_invocations: 0 };
+  try {
+    prepared = await checkDirect(manifestPath);
+    const { manifest: m, config, task } = prepared;
+    const settingsBefore = await json(config.worker.temporary_permissions.settingsPath);
+    rulesBefore = JSON.stringify(settingsBefore.permissions ?? {});
+    // Immutable fence: never automatically redispatch a previous failed/crashed run.
+    await writeNew(path.join(output, 'dispatch.json'), { run_id: runId, task_id: task.task_id });
+    report = { ...report, task_id: task.task_id, phase: 'lifecycle', provider_invocations: 'unknown',
+      source_head: git(sourceRoot, 'rev-parse', 'HEAD'), config_sha256: task.config_sha256, packet_dir: m.packetDir };
+    const state = await runBounded({ taskPath: m.taskPath, config, packetDir: m.packetDir, owner: `direct-${task.task_id}`, signal });
+    report.status = state.status; report.phase = state.phase;
+    if (state.error) report.error_code = errorCode(state.error);
+  } catch (error) {
+    report.status = 'BLOCKED';
+    report.error_code = errorCode(error);
+  } finally {
+    if (prepared) {
+      const { manifest: m, config } = prepared;
+      try {
+        if (existsSync(path.join(m.packetDir, 'state.json'))) {
+          const saved = await json(path.join(m.packetDir, 'state.json'));
+          report.worker_attempts_completed = saved.attempt; report.repairs = saved.rework_count;
+          report.review = saved.review_result?.verdict ?? null;
+          report.worker_requested_model = config.worker.model;
+          report.worker_model = saved.latest_execution?.observed_model ?? null;
+          report.worker_session = saved.conversation_id ?? null;
+          report.reviewer_session = saved.review_result?.reviewer_session ?? null;
+          report.reviewer_models = saved.review_result?.observed_models ?? [];
+          report.changed_files = saved.changed_files?.map(file => file.path) ?? [];
+          report.gates = saved.tests?.map(test => ({ id: test.id, code: test.code, timed_out: test.timed_out })) ?? [];
+          const audit = await auditSummary(m.packetDir);
+          report.worker_dispatches = audit.invalid_lines ? null : audit.operations.dispatch_started ?? 0;
+          const reviews = (await readdir(m.packetDir)).filter(name => name.startsWith('review-'));
+          report.reviewer_dispatches = 0;
+          for (const name of reviews) if (existsSync(path.join(m.packetDir, name, 'receipts', 'assignment.json'))) report.reviewer_dispatches++;
+          // Dispatch records prove attempts, not the provider's internal model calls.
+          report.provider_invocations = 'unknown';
+          report.evidence = { state: path.join(m.packetDir, 'state.json'), operations: path.join(m.packetDir, 'operations.jsonl') };
+        }
+      } catch { report.status = 'BLOCKED'; report.evidence_error = 'REPORT_EVIDENCE_UNAVAILABLE'; }
+      try {
+        const after = await json(config.worker.temporary_permissions.settingsPath);
+        assertSubscriptionSettings(after);
+        const temporary = config.worker.temporary_permissions.files.map(file => `write_file(${file})`);
+        report.temporary_rules_remaining = temporary.filter(rule => after.permissions?.allow?.includes(rule)).length;
+        report.existing_permissions_unchanged = rulesBefore === JSON.stringify(after.permissions ?? {});
+        requireValue(report.temporary_rules_remaining === 0, 'CLEANUP_UNVERIFIED');
+        requireValue(report.existing_permissions_unchanged, 'PERMISSIONS_CHANGED');
+      } catch (error) { report.status = 'BLOCKED'; report.cleanup_error = errorCode(error); }
+    }
+  }
+  report.duration_ms = Date.now() - started;
+  await writeNew(path.join(output, `${runId}.json`), report);
+  return report;
+}
+
+export async function statusDirect(manifestPath) {
+  const m = await json(manifestPath);
+  const state = await json(path.join(m.packetDir, 'state.json'));
+  return { status: state.status, task_id: state.task_id, attempts: state.attempt, repairs: state.rework_count,
+    review: state.review_result?.verdict ?? null, approved: state.checkpoint?.approved === true };
+}
+
+export async function acceptDirect(manifestPath, approvedBy) {
+  requireValue(typeof approvedBy === 'string' && approvedBy.trim().length > 0, 'APPROVER_REQUIRED');
+  const m = await json(manifestPath), config = await json(m.configPath);
+  const state = await json(path.join(m.packetDir, 'state.json'));
+  requireValue(['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(state.status), 'CHECKPOINT_NOT_READY');
+  if (state.status !== 'COMPLETED') {
+    const claim = await lifecycle.claimTask(m.taskPath, { owner: state.owner, leaseSeconds: 300 });
+    requireValue(['CLAIMED', 'ALREADY_CLAIMED'].includes(claim.status), 'CLAIM_FAILED');
+    const options = { taskPath: m.taskPath, packetDir: m.packetDir, config, owner: state.owner, approvedBy };
+    await lifecycle.approveCheckpoint(options);
+    await lifecycle.completeTask(options);
+  }
+  return statusDirect(manifestPath);
+}

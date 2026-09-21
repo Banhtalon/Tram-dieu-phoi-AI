@@ -313,7 +313,7 @@ Hard boundaries:
 - Use that exact absolute path for every file operation; do not guess, derive, or try another path.
 - If a required file is missing there, report the missing file and stop.
 - For view_file, AbsolutePath must be a canonical path inside that workspace.
-- You may edit implementation files and run relevant tests in this worktree.
+- Use only file tools on files assigned in the implementation request. The controller, not you, runs gates and tests; do not use shell or run_command.
 - Never modify ai-control.desired_state, workflow packets, leases, receipts, checkpoints, or Harness control state.
 - Never claim or approve a task, resume the Harness, change routing, commit, reset, clean, merge, publish, or deploy.
 - Leave changes in the worktree for Codex/the Harness to inspect.

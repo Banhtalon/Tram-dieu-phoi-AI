@@ -1241,7 +1241,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   await operationEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   await auditEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   const protectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
-  const prompt = `Implement the frozen task in the current worktree. Goal: ${task.goal ?? '(see acceptance criteria)'}. Only edit the frozen allowed_paths (${JSON.stringify(task.allowed_paths ?? task.write_paths ?? [])}) and run the relevant tests (${JSON.stringify(task.gates ?? [])}). Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review. Acceptance criteria: ${JSON.stringify(task.acceptance_criteria)}`;
+  const prompt = `Implement the frozen task in the current worktree. Goal: ${task.goal ?? '(see acceptance criteria)'}. Only read or edit the frozen allowed_paths (${JSON.stringify(task.allowed_paths ?? task.write_paths ?? [])}) using file tools. The controller runs all tests after your work; do not read or execute gate scripts, use shell/run_command, or inspect control files. Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review. Acceptance criteria: ${JSON.stringify(task.acceptance_criteria)}`;
   let workerResult;
   let processRelease = null;
   try {

@@ -87,6 +87,7 @@ def worker_prompt_and_view_file_scope_smoke() -> None:
         assert str(workspace.resolve()) in prompt
         assert "do not guess" in prompt.lower()
         assert "missing" in prompt.lower()
+        assert "controller, not you, runs gates and tests" in prompt.lower()
 
         cases = [
             ("workspace", str(workspace / "trial-data.txt"), False),
