@@ -7,12 +7,13 @@ Các JSON packet dùng các schema `qq.workflow.task.v10`, `qq.workflow.profile.
 hoặc `GEMINI_FIRST_V1` (tên schema tương thích v10; không có nghĩa là dùng Gemini CLI),
 prepared, local_synthetic, rationale, design_sessions và browser_required. `ui_evidence`
 lưu head, contract_sha256, URL local, status và checks gồm action/observed/passed. Config
-bridge có `fallback_worker` cho V2 và `elevated_reviewer`; profile có `elevated_review`.
+bridge có `fallback_worker` cho V2, `fallback_reviewer` Terra High được đóng băng cùng
+reviewer Gemini, và `elevated_reviewer`; profile có `elevated_review`.
 Trường usage trong lượt CLI chứa số liệu provider hoặc null.
 
 Execution identity được biểu diễn bằng các trường độc lập: `role` là trách nhiệm workflow; `provider` là dịch vụ/tài khoản; `cli` là executable thực tế; `requested_model` là model được yêu cầu; `observed_models` là model do provider/CLI báo cáo; `session_id` là phiên thực thi; `usage` là số liệu provider hoặc null. Giá trị observed model được lấy từ dữ liệu provider/CLI, tách khỏi requested model.
 
-`task.json.lock.json` lưu hash contract và risk floor. `evidence.json` lưu head, hash, lệnh gate, timeout, mã thoát và output đã redaction. `review.json` lưu session reviewer, verdict, finding, summary và kết quả kiểm tra rủi ro.
+`task.json.lock.json` lưu hash contract và risk floor. `evidence.json` lưu head, hash, lệnh gate, timeout, mã thoát và output đã redaction. `review.json` lưu session reviewer, verdict, finding, summary và kết quả kiểm tra rủi ro. Nếu đã dùng fallback reviewer, packet lưu lý do cùng receipt của cả lượt Gemini và Terra.
 
 Ngân sách thực thi dùng schema `qq.workflow.budget.v1` hoặc `qq.workflow.budget.v2`. Schema
 V2 bổ sung `active_worker`, `fallback_occurred`, `fallback_reason`, `failed_invocations`

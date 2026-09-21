@@ -16,8 +16,15 @@
     "cli": "antigravity",
     "command": ["agy"],
     "model": "gemini-3.8-flash-high",
-    "agent": "ag-reviewer-010-negative",
-    "agent_definition_sha256": "6c913480db28710d872f54ba60fbeb6bf1373130bdb76b75f7c12994d1d5b65f"
+    "agent": "ag-reviewer-011-r1",
+    "agent_definition_sha256": "ef23a4c0616a77d1d5b982c02ea07ec281c00de5d86aaa42523714b0678bdaea"
+  },
+  "fallback_reviewer": {
+    "provider": "openai",
+    "cli": "codex",
+    "command": ["codex"],
+    "model": "gpt-5.6-terra",
+    "effort": "high"
   },
   "senior": {
     "provider": "openai",

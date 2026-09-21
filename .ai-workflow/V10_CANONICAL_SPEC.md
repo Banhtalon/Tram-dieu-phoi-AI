@@ -137,13 +137,13 @@ This policy family is subscription-only.
 The V1 policy uses a designated Gemini 3.8 Flash High worker, an independent ordinary
 reviewer bound to Gemini 3.8 Flash High through a guarded Antigravity no-tools agent,
 and exactly `gpt-6-astra` at low effort for senior escalation or elevated review.
-Terra Xhigh is an explicit reviewer fallback only when the Gemini reviewer cannot be
+Terra High is an explicit reviewer fallback frozen in the task configuration only when the Gemini reviewer cannot be
 invoked; Gemini findings never trigger that fallback. Astra never escalates to Astra;
 an unavailable elevated reviewer returns WAIT/STOP and never falls back to Terra.
 The V2 policy preserves verification quality while conserving Codex tokens: it uses Sol Medium as
 Lead, Gemini 3.8 Flash High as primary survey/implementation/test/repair worker, GPT-5.6 Luna Max
 as standby fallback worker, Gemini 3.8 Flash High through a guarded Antigravity no-tools agent as
-independent ordinary reviewer, GPT-5.6 Terra Xhigh as the explicit reviewer fallback only when
+independent ordinary reviewer, GPT-5.6 Terra High as the explicit reviewer fallback only when
 Gemini cannot be invoked, GPT-5.6 Sol Medium as senior, and a fresh independent GPT-5.6 Sol Medium
 session as elevated reviewer. Lead and senior
 participants cannot serve as reviewer for that feature. Model IDs and reasoning effort are verified

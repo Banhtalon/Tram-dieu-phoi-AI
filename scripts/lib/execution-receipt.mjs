@@ -22,7 +22,7 @@ export const LUNA_EFFORT = 'max';
 export const SOL_MODEL = 'gpt-5.6-sol';
 export const SOL_EFFORT = 'medium';
 export const TERRA_MODEL = 'gpt-5.6-terra';
-export const TERRA_EFFORT = 'xhigh';
+export const TERRA_EFFORT = 'high';
 
 export const FAILURE_CODES = Object.freeze({
   CONTRACT_MISMATCH: 'CONTRACT_MISMATCH',

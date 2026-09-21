@@ -39,13 +39,13 @@ node scripts/bridge.mjs activate <bridge-config.json> <accepted-pilot-packets> <
 
 `workflow.mjs route` trả đề xuất trong chế độ ASSISTED. Bridge ghi argv, thời gian, session, model báo cáo, head, kết quả đã redaction và checkpoint vào run packets. `quota-drill` không gọi AI: nó kiểm tra cầu nối xử lý `WAITING_QUOTA` (hết hạn mức) và resume (tiếp tục) an toàn trên bản sao trạng thái. Dùng thư mục activation tách khỏi packet pilot đã chấp nhận. `activate` chỉ nhận pilot và biên nhận quota drill cùng khớp với canonical spec.
 
-Mỗi lượt thực thi phân biệt `role`, `provider`, `cli`, `requested_model`, `observed_models` và `session_id`. Antigravity là CLI hiện tại cho provider Google; Codex là CLI hiện tại cho các vai trò senior. Reviewer thông thường ưu tiên Gemini qua agent Antigravity không có tool, còn Terra Xhigh chỉ là fallback explicit khi Gemini không gọi được. Model thực tế lấy từ probe hoặc metadata do CLI/provider báo cáo, không suy đoán từ tên CLI. Bridge nhận các policy `CONTROLLED_DELEGATION_V1` và `CONTROLLED_DELEGATION_V2`; quy tắc định tuyến của chúng chỉ nằm trong canonical spec.
+Mỗi lượt thực thi phân biệt `role`, `provider`, `cli`, `requested_model`, `observed_models` và `session_id`. Antigravity là CLI hiện tại cho provider Google; Codex là CLI hiện tại cho các vai trò senior. Reviewer thông thường ưu tiên Gemini qua agent Antigravity không có tool, còn Terra High chỉ là fallback explicit khi Gemini không gọi được. Model thực tế lấy từ probe hoặc metadata do CLI/provider báo cáo, không suy đoán từ tên CLI. Bridge nhận các policy `CONTROLLED_DELEGATION_V1` và `CONTROLLED_DELEGATION_V2`; quy tắc định tuyến của chúng chỉ nằm trong canonical spec.
 
 ## Controlled Delegation V2
 
 V2 dùng Sol Medium làm Lead, Gemini 3.8 Flash High làm worker chính, Luna Max làm
 worker dự phòng, Gemini 3.8 Flash High qua agent Antigravity không có tool làm reviewer
-thông thường và Terra Xhigh làm reviewer fallback explicit khi Gemini không gọi được; Sol
+thông thường và Terra High làm reviewer fallback explicit khi Gemini không gọi được; Sol
 Medium dùng cho senior cùng reviewer rủi ro cao. V2 giữ một writer tuần tự, lưu nguyên nhân handoff Gemini → Luna,
 bộ đếm sửa và lịch sử invocation lỗi trong packet. Chi tiết binding, ngân sách và điều
 kiện chuyển tuyến nằm tại [canonical spec](V10_CANONICAL_SPEC.md#routing-and-budgets).
@@ -53,6 +53,13 @@ kiện chuyển tuyến nằm tại [canonical spec](V10_CANONICAL_SPEC.md#routi
 Report V2 hiển thị worker đang hoạt động, trạng thái fallback, số vòng sửa đã dùng/còn
 lại, lượt senior, model được yêu cầu và model provider báo cáo. `gpt-6-terra` không thuộc
 model V2; Terra `gpt-5.6-terra` chỉ dùng khi reviewer Gemini không gọi được.
+
+Agent reviewer mẫu nằm tại `.ai-workflow/agents/ag-reviewer-011-r1/agent.md`. Khi cài cho
+Antigravity, tạo đúng tên agent nếu chưa tồn tại, không ghi đè agent có sẵn, rồi kiểm tra
+SHA-256 `ef23a4c0616a77d1d5b982c02ea07ec281c00de5d86aaa42523714b0678bdaea` khớp
+`agent_definition_sha256` trong config. Bridge chỉ gọi reviewer sau khi kiểm tra file regular,
+frontmatter no-tools, agent/model quan sát được và settings subscription; `useG1Credits` thiếu
+hoặc có provider/API override đều dừng fail-closed.
 
 ## Ngữ cảnh review và dữ liệu test
 
