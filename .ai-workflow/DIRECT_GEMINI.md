@@ -4,6 +4,8 @@
 
 ## Quy trình
 
+Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc và kích thước prompt. Nếu Direct đã biết không phù hợp, xem ngoại lệ ASSISTED tại [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow). Lead ghi lý do và thông báo; Owner không phải chọn cách chạy. Không dùng ngoại lệ để chạy lại Direct đã thất bại, vượt ngân sách hoặc chưa rõ kết quả.
+
 1. Dùng task `qq.workflow.task.v10.1` và config `qq.bridge.v2` hiện có; chốt repo chính, base SHA, mục tiêu, tiêu chí, exact `allowed_paths`/`write_paths` và gates. Owner chỉ cần mô tả công việc. Điều phối soạn JSON.
 2. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Direct preflight không còn yêu cầu hoặc đọc định nghĩa agent Gemini no-tools, kiểm tra thuê bao Antigravity và quyền ghi tạm thời của worker vẫn giữ nguyên. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
 3. Chạy `prepare`, rồi `check`; hai lệnh này không gọi model. `prepare` tạo task/lock và helper dưới `.workflow-local/direct/<task_id>`, packet bên ngoài repo, giữ nguyên trạng thái paused/stopped. Chỉ hỗ trợ repo chính, không dùng một worktree làm repo nguồn. Thêm `.workflow-local/` vào ignore của repo trước khi chuẩn bị.
@@ -12,6 +14,8 @@
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
 ## Cú pháp PowerShell
+
+`status` và `accept` trả thêm `owner_message` tiếng Việt, giữ nguyên `status`. `COMPLETED` là hoàn tất trong vùng riêng, chưa xác nhận đưa vào dự án chính. Lead ghi commit đích vào checklist sau khi được phép gộp và xác minh.
 
 Đứng tại thư mục mã nguồn Trạm Điều Phối AI. Các biến bên dưới do Điều phối điền bằng đường dẫn thực tế; Owner không phải tự sửa lệnh. Hai file đầu vào dùng đúng schema đang có, không thêm schema yêu cầu mới.
 

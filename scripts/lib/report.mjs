@@ -15,7 +15,7 @@ function clean(value,key=''){
 const scalar=value=>typeof value==='string'?value:value??null;
 const ownerStatus=(value,hasBoundProductEvidence=false)=>({
   READY_FOR_OWNER:hasBoundProductEvidence?'Đã qua kiểm tra kỹ thuật và đang chờ Owner thử':'Đã qua kiểm tra kỹ thuật; Sol/Lead đang chuẩn bị hướng dẫn thử',
-  DONE:'Đã hoàn tất quy trình được ghi nhận',
+  DONE:'Đã hoàn tất quy trình được ghi nhận; chưa xác nhận đã gộp hoặc phát hành',
   WAITING_QUOTA:'Đang chờ hạn mức sử dụng dịch vụ',
   WAITING_CAPABILITY:'Đang chờ công cụ cần thiết hoạt động lại',
   BLOCKED_TECHNICAL:'Đang vướng lỗi kỹ thuật',
@@ -87,13 +87,13 @@ function nextStep(state,hasBoundProductEvidence,audience,hasBlockers=false){
     case 'WAIT':return owner?'Sol/Lead sẽ xử lý điều kiện đang chờ trước khi tiếp tục.':'Inspect the full packet and resolve the recorded wait condition before resume.';
     case 'STOP':return owner?'Sol/Lead sẽ kiểm tra lý do dừng trước khi tiếp tục.':'Inspect the full packet and resolve the recorded stop reason before any resume.';
     case 'READY_FOR_OWNER':return hasBoundProductEvidence?(owner?'Owner có thể thử sản phẩm theo hướng dẫn bên dưới.':'Owner may perform the recorded local product actions.'):(owner?'Sol/Lead sẽ kiểm tra và bổ sung hướng dẫn thử nếu tính năng có giao diện.':'Inspect the full packet; no current bound local product actions were observed.');
-    case 'DONE':return owner?'Bản tóm tắt này không đề xuất thêm thao tác.':'No workflow action is suggested by this derived report.';
+    case 'DONE':return owner?'Lead xác minh việc gộp và ghi commit đích sau khi Owner cho phép.':'Lead must verify integration and record the destination commit after Owner authorization.';
     default:return owner?'Sol/Lead sẽ kiểm tra hồ sơ trước khi quyết định bước tiếp theo.':'Inspect the full packet before deciding whether resume is safe.';
   }
 }
 
 function nextActor(state,hasBoundProductEvidence,hasBlockers=false){
-  if(state?.status==='DONE'&&!hasBlockers)return 'Không cần thao tác thêm';
+  if(state?.status==='DONE'&&!hasBlockers)return 'Sol/Lead';
   if(state?.status==='READY_FOR_OWNER'&&hasBoundProductEvidence)return 'Owner';
   return 'Sol/Lead';
 }
@@ -239,6 +239,22 @@ export async function buildReport(packetDir,{audience='owner'}={}){
     value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim());
   const product=productCandidates.find(validProduct)??null;
   const reviewValid=!!review&&review.verdict==='PASS'&&review.independent===true&&review.material_findings.length===0;
+  let productNotApplicable=false;
+  if(!identityConflict&&strictlyBound(task,identity)&&task.user_visible===false&&
+      (task.product_checks??task.product_check)?.applicable===false&&
+      !productCandidates.some(value=>value!=null&&!validProduct(value))){
+    try{
+      if(task.schema_version==='qq.workflow.task.v10.1'){
+        const {assertControlledContract}=await import('./controlled-bridge.mjs');
+        await assertControlledContract(taskPath,task);
+      }else{
+        const {assertContract}=await import('./workflow.mjs');
+        await assertContract(taskPath,task);
+      }
+      productNotApplicable=true;
+    }catch{ /* Unreadable or changed frozen contract remains unverified. */ }
+  }
+  const receiptData=await receiptInvocations(packetDir,state,identity);
   const preliminaryBlockers=blockersFor(state,evidence,review,audience);
   if(identityConflict)preliminaryBlockers.push(audience==='owner'?'Lead cần đối soát định danh task và checkpoint.':'Task and checkpoint identity conflict; Lead reconciliation is required.');
   if(['READY_FOR_OWNER','DONE'].includes(state.status)&&!evidence)preliminaryBlockers.push(audience==='owner'?'Chưa có bằng chứng kiểm tra hợp lệ cho bản hiện tại.':'Current bound gate evidence is unavailable.');
@@ -251,14 +267,15 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const effectiveState=identityConflict?{...state,reconciliation_required:true}:state;
   const ownerSummary=audience==='owner'?{
     technical_checks:evidence?`${(evidence.gates??[]).filter(g=>g.code===0&&!g.timed_out&&!g.interrupted).length}/${(evidence.gates??[]).length} kiểm tra kỹ thuật đạt.`:'Chưa có bằng chứng kiểm tra kỹ thuật hợp lệ.',
-    independent_review:review?(review.verdict==='PASS'&&review.material_findings.length===0?'Đánh giá độc lập đã đạt.':`Đánh giá độc lập chưa đạt; còn ${review.material_findings.length} vấn đề cần xử lý.`):'Chưa có đánh giá độc lập hợp lệ.',
-    product_check:product?`Kiểm tra sản phẩm đã đạt với ${product.checks.length} thao tác được ghi nhận.`:'Chưa có bằng chứng kiểm tra sản phẩm hợp lệ.'
+    independent_review:reviewValid&&!identityConflict?'Đánh giá độc lập đã đạt.':'Chưa xác minh đánh giá độc lập đạt cho bản hiện tại.',
+    product_check:identityConflict?'Chưa xác minh kiểm tra sản phẩm.':product?`Kiểm tra sản phẩm đã đạt với ${product.checks.length} thao tác được ghi nhận.`:productNotApplicable?'Không áp dụng kiểm tra giao diện cho tác vụ này.':'Chưa xác minh kiểm tra sản phẩm.'
   }:null;
   const base={schema_version:'qq.workflow.report.v1',audience,derived_only:true,readiness_certified:false,source_reference:packetDir,
     goal:scalar(task?.goal??state.goal??null),observed_status:scalar(state.status),observed_phase:scalar(state.phase),blockers,next_step:nextStep(effectiveState,!!localActions.length,audience,blockers.length>0),
-    next_actor:nextActor(effectiveState,!!localActions.length,blockers.length>0),local_product_url:localUrl,local_product_actions:localActions,owner_summary:ownerSummary,truncation:{applied:false,omitted_items:0,source_reference:packetDir},report_bytes:null};
+    next_actor:nextActor(effectiveState,!!localActions.length,blockers.length>0),local_product_url:localUrl,local_product_actions:localActions,owner_summary:ownerSummary,
+    execution_note:state.mode==='ASSISTED'&&!receiptData.observed?'ASSISTED: chưa có biên nhận gọi qua bridge hợp lệ; model và usage chưa xác định.':null,
+    truncation:{applied:false,omitted_items:0,source_reference:packetDir},report_bytes:null};
   if(audience==='lead'){
-    const receiptData=await receiptInvocations(packetDir,state,identity);
     const lastConfirmed=review?{phase:'reviewer',head:identity.head,status:review.verdict}:
       evidence?{phase:'gates',head:identity.head,status:evidence.status}:null;
     let budget;
@@ -289,8 +306,9 @@ function markdown(report){
   const owner=report.audience==='owner';
   const summary=report.owner_summary??{technical_checks:'Chưa có thông tin tổng hợp.',independent_review:'Chưa có thông tin tổng hợp.',product_check:'Chưa có thông tin tổng hợp.'};
   const ownerBlockers=report.blockers.length?[`- Có ${report.blockers.length} trở ngại được ghi nhận; Sol/Lead cần xem hồ sơ kỹ thuật và diễn giải từng ảnh hưởng trước khi tiếp tục.`]:['- Trong phần tóm tắt chưa ghi nhận trở ngại. Đây chưa phải kết luận nghiệm thu.'];
-  const ownerNext=report.observed_status==='READY_FOR_OWNER'&&report.local_product_actions.length?'Owner có thể thử sản phẩm theo hướng dẫn tiếng Việt do Sol/Lead cung cấp.':report.observed_status==='DONE'&&!report.blockers.length?'Không cần thao tác thêm theo hồ sơ hiện tại.':'Sol/Lead cần xử lý các điều kiện đang chờ và báo lại Owner bằng tiếng Việt.';
+  const ownerNext=report.observed_status==='READY_FOR_OWNER'&&report.local_product_actions.length?'Owner có thể thử sản phẩm theo hướng dẫn tiếng Việt do Sol/Lead cung cấp.':report.observed_status==='DONE'&&!report.blockers.length?'Lead xác minh việc gộp và ghi commit đích sau khi Owner cho phép.':'Sol/Lead cần xử lý các điều kiện đang chờ và báo lại Owner bằng tiếng Việt.';
   const lines=[owner?'# Báo cáo công việc cho Owner':'# Workflow report (lead)','',owner?`- Tình trạng: ${ownerStatus(report.observed_status,report.local_product_actions.length>0)}`:`- Observed status: ${report.observed_status??'unavailable'}`,owner?'- Mục tiêu: Thực hiện yêu cầu đã được Owner chốt; Điều phối chịu trách nhiệm diễn giải kết quả cụ thể bằng tiếng Việt.':`- Goal: ${report.goal??'unavailable'}`,...(owner?[`- Người chuẩn bị báo cáo: Sol/Lead, bằng công cụ V10`,`- Người thực hiện bước tiếp theo: ${report.next_actor}`]:[]),owner?'- Đây là bản tóm tắt tiến độ. Việc nghiệm thu vẫn dựa trên các kiểm tra và xác nhận bắt buộc của V10.':'- Derived only: yes; readiness certified: no',...(owner?['','## Kết quả kiểm tra','',`- ${summary.technical_checks}`,`- ${summary.independent_review}`,`- ${summary.product_check}`]:[]),'',owner?'## Trở ngại':'## Blockers','',...(owner?ownerBlockers:(report.blockers.length?report.blockers.map(x=>`- ${x}`):['- None recorded in the inspected fields; this is not readiness certification.'])),'',owner?'## Bước tiếp theo':'## Next step','',owner?ownerNext:report.next_step];
+  if(report.execution_note)lines.push('',report.execution_note);
   if(report.local_product_actions.length)lines.push('',owner?'## Thao tác thử local đã liên kết':'## Bound local product actions','',...(report.local_product_url?[`- URL: ${report.local_product_url}`]:[]),...(owner?[`- Có ${report.local_product_actions.length} thao tác đã đạt trong bằng chứng. Sol/Lead phải diễn giải từng thao tác bằng tiếng Việt trước khi giao Owner thực hiện.`]:report.local_product_actions.map(x=>`- ${x}`)));
   if(report.audience==='lead')lines.push('','## Lead observations','',`\`\`\`json\n${JSON.stringify({task:report.task,checkpoint:report.checkpoint,evidence:report.evidence,gates:report.gates,review:report.review,budget:report.budget,evidence_refs:report.evidence_refs,invocations:report.invocations,report_bytes:report.report_bytes},null,2)}\n\`\`\``);
   lines.push('',owner?'Tham chiếu packet đầy đủ:':'Full packet reference:',report.source_reference,'',owner?`Đã rút gọn: ${report.truncation.applied?'có':'không'}; mục lược bỏ: ${report.truncation.omitted_items}`:`Truncated: ${report.truncation.applied?'yes':'no'}; omitted items: ${report.truncation.omitted_items}`);

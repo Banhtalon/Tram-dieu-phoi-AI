@@ -4,9 +4,30 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect } from './direct-run.mjs';
+import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect, statusDirect, acceptDirect } from './direct-run.mjs';
 import * as lifecycle from './harness-lifecycle.mjs';
 import { freezeControlledTask } from './controlled-bridge.mjs';
+
+test('Direct status and completed accept explain ownership without claiming integration', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'direct-owner-message-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const taskPath = path.join(root, 'task.json'), configPath = path.join(root, 'config.json'), manifestPath = path.join(root, 'prepared.json');
+  const task = JSON.parse(await readFile(new URL('../../.ai-workflow/templates/task.json', import.meta.url), 'utf8'));
+  Object.assign(task, { base_sha: 'a'.repeat(40), user_visible: false, product_check: { applicable: false, reason: 'synthetic fixture' } });
+  const config = { mode: 'ASSISTED' };
+  await freezeControlledTask(taskPath, task, config);
+  await writeFile(configPath, JSON.stringify(config));
+  await writeFile(manifestPath, JSON.stringify({ taskPath, configPath, packetDir: root }));
+  for (const [status, expected] of Object.entries({ WAITING_FOR_CHECKPOINT: /Owner nghiệm thu/, CHECKPOINTED: /Lead.*kết thúc/, PRODUCT_CHECK_WAIT: /Lead.*không gọi lại AI/, RECOVERY_REQUIRED: /Lead đối soát/, BLOCKED: /Lead/, COMPLETED: /chưa xác nhận đưa vào dự án chính/ })) {
+    await writeFile(path.join(root, 'state.json'), JSON.stringify({ status, task_id: task.task_id, error: { code: 'CHECKPOINT_REQUIRED', message: 'synthetic private detail' } }));
+    const result = await statusDirect(manifestPath);
+    assert.equal(result.status, status);
+    assert.match(result.owner_message, expected);
+    assert.match(result.owner_message, /CHECKPOINT_REQUIRED/);
+    assert.doesNotMatch(result.owner_message, /synthetic private detail/);
+    if (status === 'COMPLETED') assert.deepEqual(await acceptDirect(manifestPath, 'fixture-owner'), result);
+  }
+});
 
 test('one process, at most one repair, close on PASS/block/error and preserve instruction', async () => {
   for (const status of ['WAITING_FOR_CHECKPOINT', 'REQUEST_CHANGES', 'WAITING_QUOTA', 'throw']) {

@@ -1,23 +1,8 @@
-# Routing v10
+# Định tuyến hiện hành
 
-Định tuyến model, giới hạn sửa và trạng thái chờ được định nghĩa tại [quy tắc workflow v10](V10_CANONICAL_SPEC.md#routing-and-budgets).
-`node scripts/workflow.mjs route` là lệnh xem đề xuất định tuyến. Trang này không bổ sung quy tắc workflow.
+Công việc mới theo [Direct](DIRECT_GEMINI.md): Gemini thực hiện, controller kiểm thử, Luna review, Owner nghiệm thu. Ngoại lệ ASSISTED trước dispatch xem [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow); Owner không phải chọn mã chính sách.
 
-Hai mã chính sách hiện có là `CONTROLLED_DELEGATION_V1` và `CONTROLLED_DELEGATION_V2`. Binding, effort, ngân sách và điều kiện fallback chỉ được định nghĩa trong canonical spec.
+`workflow.mjs init` vẫn tạo task mang discriminator `CONTROLLED_DELEGATION_V1` để tương thích schema. Điều này không thay cấu hình reviewer Direct hoặc runtime tác vụ cũ.
 
-Task mới mặc định dùng V1 và file mẫu `BRIDGE_CONFIG.controlled.example.json` tương ứng
-với tuyến V1. Task chọn V2 cần policy và bridge configuration cùng khớp.
-
-Binding đọc nhanh của V2:
-
-| Vai trò | Model | Effort |
-| --- | --- | --- |
-| Lead | `gpt-5.6-sol` | `medium` |
-| Worker chính | `gemini-3.8-flash-high` | — |
-| Worker dự phòng | `gpt-5.6-luna` | `max` |
-| Reviewer thông thường | `gemini-3.8-flash-high` qua Antigravity agent `tools: []` | — |
-| Reviewer dự phòng | `gpt-5.6-terra` | `high`, chỉ khi Gemini không gọi được |
-| Senior | `gpt-5.6-sol` | `medium` |
-| Reviewer rủi ro cao | `gpt-5.6-sol` | `medium` |
-
-Model `gpt-6-astra` thuộc binding V1; `gpt-6-terra` không nằm trong danh sách V2.
+## Hồ sơ lịch sử
+`CONTROLLED_DELEGATION_V1`, `CONTROLLED_DELEGATION_V2`, `GEMINI_FIRST_V1` giữ cấu hình, phiên bản và ngân sách đã đóng băng. Binding nằm trong [canonical](V10_CANONICAL_SPEC.md#routing-and-budgets). `workflow.mjs route` dành cho legacy, không phải lựa chọn Owner cần đưa ra cho công việc mới.

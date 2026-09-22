@@ -1,20 +1,11 @@
 # Hướng dẫn Owner
 
-Bạn mở Codex trong thư mục dự án và mô tả tính năng mong muốn. AI đọc task hiện tại, xử lý phần kỹ thuật và báo khi có bản dùng thử.
+Anh mô tả công việc. Điều phối đọc [HANDOFF](../HANDOFF.md), chốt phạm vi và xử lý kỹ thuật.
 
-Khi bridge đạt `WAITING_QUOTA` (hết hạn mức), `WAITING_CAPABILITY` (thiếu công cụ hoặc đăng nhập), `BLOCKED_TECHNICAL`, `READY_FOR_OWNER` hoặc `DONE`, Lead đưa bản tóm tắt Owner hiện hành. Báo cáo nêu checkpoint đang giữ và bước tiếp theo; `READY_FOR_OWNER` kèm các bước dùng thử, còn `DONE` ghi nhận nghiệm thu.
+Luồng hiển thị: giao việc → đang thực hiện → đang kiểm tra → chờ nghiệm thu → chờ gộp → đã gộp. Bị chặn luôn kèm nguyên nhân và người xử lý tiếp.
 
-Ví dụ yêu cầu: “Thêm bộ lọc nhận xét theo lớp; đổi lớp vẫn giữ ghi chú chưa lưu.”
+Mặc định Gemini thực hiện, chương trình chạy kiểm thử, Luna review độc lập. Công cụ không phù hợp trước khi chạy thì Điều phối có thể xử lý ASSISTED theo [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow), ghi rõ lý do. Anh không cần chọn chính sách, đọc packet hoặc chạy test.
 
-Bạn quyết định cách ứng dụng hoạt động, đăng nhập khi cần, dùng thử và duyệt merge. [V10 canonical spec](V10_CANONICAL_SPEC.md) là nguồn quy tắc workflow duy nhất; [Owner status](OWNER_STATUS.md) có mẫu báo cáo ngắn.
+Anh quyết định hành vi sản phẩm, chi phí, quyền tài khoản và dữ liệu thật; đăng nhập khi cần. Anh xem ví dụ/dùng thử rồi nghiệm thu. Gộp vào dự án và phát hành là quyết định riêng.
 
-## Luồng hiện tại
-
-Bản `10.1.0-rc.2` có cầu nối CLI tuần tự cho worker và reviewer Gemini qua Antigravity
-(`agy`); senior vẫn qua Codex CLI. Task mới dùng Controlled Delegation V1 theo mặc định; V2
-là tuyến tùy chọn với worker Gemini, Luna dự phòng, receipt requested-versus-observed và
-báo cáo trạng thái fallback. Kết quả `pilot`, `run` và `resume` có sẵn bản Owner và
-Lead trong JSON tại checkpoint báo cáo.
-
-Owner thường chỉ cần mô tả tính năng, đăng nhập khi CLI yêu cầu, dùng thử bản Lead đưa ra
-và phản hồi kết quả. Owner không cần tự đọc packet hoặc chạy bộ test nội bộ của workflow.
+`DONE`/`COMPLETED` chỉ ghi nhận hoàn tất quy trình, chưa chứng minh kết quả đã vào dự án chính. Sau khi được phép gộp, Điều phối kiểm tra và ghi mốc đích trong checklist. Thiếu bằng chứng thì báo chưa xác minh.

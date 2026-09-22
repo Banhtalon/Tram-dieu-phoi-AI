@@ -180,7 +180,22 @@ export async function runDirect(manifestPath, signal) {
 export async function statusDirect(manifestPath) {
   const m = await json(manifestPath);
   const state = await json(path.join(m.packetDir, 'state.json'));
-  return { status: state.status, task_id: state.task_id, attempts: state.attempt, repairs: state.rework_count,
+  const owner_message = {
+    WAITING_FOR_CHECKPOINT: 'Đã đạt các kiểm tra bắt buộc; chờ Owner nghiệm thu.',
+    CHECKPOINTED: 'Đã ghi nhận nghiệm thu; Lead tiếp tục bước kết thúc.',
+    COMPLETED: 'Đã hoàn tất trong vùng làm việc riêng; chưa xác nhận đưa vào dự án chính. Lead xác minh việc gộp sau khi Owner cho phép.',
+    PRODUCT_CHECK_WAIT: 'Đang chờ kiểm tra sản phẩm; Lead xử lý điều kiện kiểm tra, không gọi lại AI.',
+    RECOVERY_REQUIRED: 'Kết quả thao tác trước chưa rõ; Lead đối soát trước khi tiếp tục.',
+    PAUSED: 'Đang tạm dừng; Lead kiểm tra yêu cầu tiếp tục.',
+    RUNNING: 'Đang thực hiện; Lead theo dõi kết quả.',
+    READY_FOR_REVIEW: 'Đang chờ đánh giá độc lập; Lead xử lý bước review.',
+    REQUEST_CHANGES: 'Cần sửa theo kết quả kiểm tra; Lead xử lý trong số lượt còn lại.',
+    RETRY_EXHAUSTED: 'Đã hết số lượt sửa; Lead báo trở ngại, không tự chạy lại.',
+    CHECKPOINT_REJECTED: 'Chưa được nghiệm thu; Lead xử lý lý do từ chối.',
+    LEASE_EXPIRED: 'Quyền giữ tác vụ đã hết hạn; Lead đối soát trước khi tiếp tục.'
+  }[state.status] ?? 'Chưa xác nhận hoàn tất; Lead kiểm tra hồ sơ và xử lý bước tiếp theo.';
+  const reason = /^[A-Z][A-Z0-9_]{0,63}$/.test(state.error?.code ?? '') ? ` Mã nguyên nhân: ${state.error.code}.` : '';
+  return { status: state.status, owner_message: owner_message + reason, task_id: state.task_id, attempts: state.attempt, repairs: state.rework_count,
     review: state.review_result?.verdict ?? null, product_check: state.product_check?.status ?? (state.product_check === null ? 'NOT_APPLICABLE' : null), approved: state.checkpoint?.approved === true };
 }
 

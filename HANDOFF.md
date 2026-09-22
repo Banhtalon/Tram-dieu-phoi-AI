@@ -1,19 +1,21 @@
-# Handoff hiện hành
+# Bàn giao hiện hành
 
-## Luồng mặc định
+Điểm bắt đầu cho AI tiếp quản; nguồn quy tắc là [canonical spec](.ai-workflow/V10_CANONICAL_SPEC.md).
 
-Điều phối gọi Gemini Flash 3.8 High trực tiếp bằng `scripts/direct.mjs`; Luna Max chỉ review độc lập, không làm runner hoặc worker.
+1. Đọc canonical spec, sau đó [checklist](docs/WORKFLOW_SIMPLIFICATION.md).
+2. Mở `.workflow-local/workflow-simplification/contract.json` và `contract.sha256`, rồi bằng chứng và review được checklist dẫn tới. Hồ sơ local không nằm trong Git; thiếu hồ sơ thì báo thiếu bằng chứng, không suy đoán hoặc chạy lại.
+3. Kiểm tra `git status --short`, `git branch --show-current`, `git rev-parse HEAD`; đối chiếu với commit nền và commit review trong checklist.
+4. Tiếp tục đúng phần còn mở. Lead đối soát thao tác chưa rõ kết quả trước mọi dispatch.
 
-1. Owner mô tả công việc.
-2. Điều phối tạo task/config đã đóng băng phạm vi, rồi chạy `prepare` → `check` → `run`.
-3. Worker Gemini chỉ sửa đúng file được giao. Controller tự chạy gate/test. Reviewer Luna Max kiểm tra độc lập ở chế độ chỉ đọc. Các AI có thể bàn giao kỹ thuật bằng tiếng Anh; Điều phối báo cáo Owner bằng tiếng Việt.
-4. Tối đa một lượt làm đầu và một lượt sửa trong cùng tiến trình. Lỗi quota, quyền hoặc phạm vi thì dừng, không tự chạy lại.
-5. Product Check bắt buộc phải đạt khi hợp đồng yêu cầu. `PRODUCT_CHECK_WAIT` chỉ cho phép chạy lại bước kiểm tra bằng `verify-product`, không gọi lại AI. `WAITING_FOR_CHECKPOINT` chờ Owner nghiệm thu; sau xác nhận, Điều phối chạy `accept` và tạo mốc khôi phục.
+## Luồng công việc mới
+Gemini 3.8 Flash High thực hiện → controller kiểm thử → Luna Max review → Owner nghiệm thu → chờ gộp có phép → ghi commit đích đã xác minh.
 
-Hướng dẫn đầy đủ: `.ai-workflow/DIRECT_GEMINI.md`.
+Trước gọi AI, Lead kiểm tra nguồn review, bộ lọc và kích thước. Ngoại lệ ASSISTED và ngân sách xem [canonical](.ai-workflow/V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow); lệnh xem [Direct](.ai-workflow/DIRECT_GEMINI.md). Owner không phải chọn chính sách cũ.
 
-## Trạng thái
+## Bàn giao theo vai trò
+- Implementer: dùng [mẫu giao việc](.ai-workflow/prompts/IMPLEMENTER_BOOTSTRAP.md), trả [implementer-result](.ai-workflow/templates/implementer-result.md) trong packet.
+- Reviewer: dùng [mẫu review](.ai-workflow/prompts/REVIEWER_BOOTSTRAP.md), trả `review.json` theo [mẫu sẵn có](.ai-workflow/templates/review.json).
+- Lead: giữ một người ghi mã, cập nhật checklist và báo Owner bằng tiếng Việt; bàn giao kỹ thuật có thể dùng tiếng Anh.
 
-DIRECT-GEMINI-001 đã hoàn tất và được tích hợp ở commit `6137fa70e3bc0ed6d293d0ae5e7a988ba5fb5442`.
-
-Hồ sơ cũ được lưu ngoài repo tại `F:\MINDX_project test\Trạm Điều Phối AI-ARCHIVE-20260922`.
+## Mốc bảo toàn
+Hai lỗi được sửa tại `6ed6a58`, là nền đợt này; chưa xác nhận gộp vào nhánh đích. Mốc DIRECT-GEMINI-001 lịch sử `6137fa70e3bc0ed6d293d0ae5e7a988ba5fb5442` không thay thế bằng chứng hiện tại.

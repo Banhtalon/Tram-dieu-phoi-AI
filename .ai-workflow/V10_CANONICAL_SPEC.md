@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.4 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.5 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -10,6 +10,52 @@ Lead may choose implementation details and strengthen tests without Owner involv
 Any contract change starts a new revision, records why, invalidates evidence/review;
 never silently weaken gates. A task uses one workflow version throughout a revision.
 Legacy v9 rules apply only to explicitly unconverted host tasks.
+
+## Current entry and Owner workflow
+For new work, the default operational route is Direct: Gemini 3.8 Flash High
+implements, the controller runs gates, Luna Max independently reviews, then Owner
+accepts. Existing frozen tasks retain their own version, policy and budgets; the
+V1 schema discriminator used by init is not a request for Owner to choose a lane.
+HANDOFF.md is the current entry, linking this specification, the tracked progress
+checklist and the active local packet. Guides and checklists record execution,
+not additional workflow rules. Owner-facing stages are assigned, implementing,
+checking, awaiting acceptance, awaiting integration and integrated; blocked work
+includes a reason and next actor. Internal state codes remain unchanged.
+
+Before dispatch, Lead checks required review source, secret filtering and full
+packet size using existing tools. A known oversized or otherwise unsuitable Direct
+review is not dispatched. Within Owner-authorized scope Lead may select ASSISTED
+before dispatch, record and announce the technical reason without asking Owner to
+choose execution mechanics. Lead implements/tests; a fresh independent reviewer
+reads the exact committed source and evidence, preferring Luna when available.
+ASSISTED does not claim a Direct invocation or invent provider receipts/metadata.
+Direct retains its 256 KiB cap and all required context and credential controls.
+ASSISTED review may read the pinned source in parts rather than construct a Direct
+prompt. Its contract freezes scope, gates, risk and a finite repair budget first.
+
+After a Direct dispatch, permission/scope failures, quota exhaustion, uncertain
+execution or exhausted budgets cannot trigger ASSISTED replay. Preserve the
+checkpoint and reconcile; changing task/revision/route does not reset budgets.
+Account permissions, cost, product scope, live data, integration and publication
+still require the applicable Owner authorization. Integration is separate from
+acceptance: DONE/COMPLETED records workflow completion, not proof of integration
+or publication. Lead records the verified destination commit after authorized
+integration; missing evidence remains unverified.
+
+Handoffs bind task/revision, branch, base/final head, contract digest, write/read
+scope, exclusions, exact checks with cwd, remaining budget, stop conditions,
+evidence paths and next actor. Implementers report changes and actual checks,
+never self-approve. Reviewers do not edit or recursively delegate; they return
+PASS/NEEDS_FIX/BLOCKED with location, impact and reproduction for material findings.
+A code change invalidates old-head review. A later progress-only documentation
+commit identifies the reviewed source commit separately and does not claim a new
+code review. Missing observed model/usage remains unavailable.
+
+Reports describe Product Check as not applicable only for a matching frozen
+internal task explicitly declaring it non-applicable. Unreadable, conflicting or
+unverified records remain unverified. Review success requires matching evidence,
+independence, PASS and no material findings. ASSISTED reports disclose absent
+bridge receipts. Reporting never changes saved state or authorizes integration.
 
 ## Document hierarchy
 This specification is the sole source of workflow rules. Supporting documents may
