@@ -1,1 +1,4 @@
 .workflow-local/
+.codex/
+.worktrees/
+__pycache__/
