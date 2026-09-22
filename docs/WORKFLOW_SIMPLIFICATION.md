@@ -5,8 +5,8 @@
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: E; B–D đã sửa và kiểm tra tập trung đạt, chưa có kết luận review độc lập.
-- Người/AI xử lý tiếp: Lead thực hiện, phiên Luna độc lập review sau kiểm thử.
+- Phần đang làm: E — WAITING_QUOTA. B–D đã sửa, chưa có review độc lập PASS.
+- Người/AI xử lý tiếp: sau khi credits được khôi phục, Lead kiểm tra lại đúng commit rồi giao phiên Luna độc lập review. Không tự gọi lại.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -26,11 +26,20 @@
 - [ ] F. Owner nghiệm thu ba ví dụ báo cáo.
 - [ ] G. Gộp bản đã duyệt khi Owner cho phép; ghi commit nhánh đích.
 
+## Trạng thái bàn giao mới nhất
+- Commit mã nguồn cần review: `aa805974a527c8e7878ebf8fe29a13adf1facb0b`.
+- Bộ đầy đủ: 67/67 PASS tại `10cceb6`; sửa bổ sung báo cáo legacy tại `aa80597`, 2/2 kiểm tra phần bị ảnh hưởng PASS; diff-check PASS. Chưa chạy lại toàn bộ trên commit cuối.
+- Review 1/3 không thực thi thành công: workspace out of credits; không có PASS, observed model chưa xác định. Không fallback hoặc tự retry.
+- Sửa đã dùng 1/2; chưa nghiệm thu, chưa gộp.
+- Hồ sơ: `.workflow-local/workflow-simplification/{state,evidence,review}.json`, `gates.log`, `report-recheck.log`, `OWNER_EXAMPLES.md`, `product-observations.json`.
+- Ví dụ được sinh tại `10cceb6`; hàm Direct không đổi sau đó. Trước nghiệm thu, làm mới bằng chứng cho đúng commit cuối.
+- Tiếp theo: khôi phục khả năng review → chạy final gates → review đúng head/hash → E → Owner F → G nếu có phép.
+
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
 |---|---|---|---|---|---|
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
-| B–D | Đã sửa, chờ review | Commit triển khai sẽ ghi sau khi chốt | 6/6 kiểm tra tập trung đạt | Chưa chạy | Bộ kiểm tra cuối + review |
+| B–D | Đã sửa, chờ review | `aa80597` | 67/67 tại nền; 2/2 phần sửa mới | Bị chặn do credits | Final gates + review |
 | E–G | Chưa làm | — | — | — | Theo thứ tự checklist |
 
 ## Kiểm tra và nghiệm thu dự kiến
