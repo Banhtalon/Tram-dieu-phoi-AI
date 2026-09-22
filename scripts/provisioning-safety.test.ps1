@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param()
 
@@ -284,5 +284,21 @@ foreach ($source in @($provisionSource, $rollbackSource)) {
 }
 $passed++
 Write-Output 'PASS kiểm tra root chồng lấn có ngoặc an toàn'
+
+foreach ($scriptFile in @(
+  (Join-Path $PSScriptRoot 'provision-antigravity-worker.ps1'),
+  (Join-Path $PSScriptRoot 'unprovision-antigravity-worker.ps1'),
+  (Join-Path $PSScriptRoot 'lib\provisioning-safety.ps1'),
+  $PSCommandPath
+)) {
+  $parseTokens = $null
+  $parseErrors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile($scriptFile, [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+  if ($parseErrors.Count -ne 0) {
+    throw "PowerShell parse failed for $scriptFile at line $($parseErrors[0].Extent.StartLineNumber): $($parseErrors[0].Message)"
+  }
+  $passed++
+  Write-Output "PASS parse $([IO.Path]::GetFileName($scriptFile))"
+}
 
 Write-Output "provisioning safety tests: $passed passed"
