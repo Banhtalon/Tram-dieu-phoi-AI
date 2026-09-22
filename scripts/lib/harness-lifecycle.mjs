@@ -1369,6 +1369,11 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
     await saveState(state, paths, { phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, status: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'review packet is not recoverable' }, error }, claim);
     return resultOf(state);
   }
+  if (packet.review_result !== null) {
+    const error = fail('STATE_CORRUPTION', 'pending review packet already contains an unverified result', { task_id: task.task_id });
+    await saveState(state, paths, { phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, status: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'pending review result requires reconciliation' }, error }, claim);
+    return resultOf(state);
+  }
   const current = await buildChangesetPacket(state.workspace, task, state.tests);
   if (current.signature !== packet.changeset_signature) {
     const error = fail('REVIEW_STALE', 'workspace changed while review was paused', { task_id: task.task_id });
@@ -1383,7 +1388,7 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
   }
   const control = assertDispatchAllowed(await readDesiredState(state.repo_root, config));
   const protectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
-  const review = packet.review_result ?? await independentReview({ task, packet, config, packetDir: paths.packetDir, cwd: state.workspace, state, signal, reviewerInvoker });
+  const review = await independentReview({ task, packet, config, packetDir: paths.packetDir, cwd: state.workspace, state, signal, reviewerInvoker });
   await validateLease(paths.taskPath, { owner, token: claim.lease_token, version: claim.version });
   await assertProtectedUnchanged(protectedSnapshot);
   packet.review_result = review;
