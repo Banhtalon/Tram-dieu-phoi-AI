@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -7,6 +7,7 @@ import {
   antigravityReviewerArgs,
   antigravityReviewerInput,
   assertSubscriptionSettings,
+  codexSessionIdentity,
   invocation,
   parseProtocol,
   validateNoToolsAgentDefinition,
@@ -67,6 +68,20 @@ test('Luna Max reviewer runs through Codex in read-only mode', async t => {
   assert.equal(spec.argv.includes('gpt-5.6-luna'), true);
   assert.equal(spec.argv.includes('read-only'), true);
   assert.equal(spec.argv.includes('model_reasoning_effort="max"'), true);
+});
+
+test('Codex reviewer identity is read from its saved session', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qq-codex-session-'));
+  const day = path.join(root, '2026', '09', '22');
+  const session = '01a0c786-b40d-7cf2-a17a-fc00e05fc449';
+  await mkdir(day, { recursive: true });
+  await writeFile(path.join(day, `rollout-${session}.jsonl`), [
+    JSON.stringify({ type: 'session_meta', payload: { id: session } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-luna', effort: 'max' } })
+  ].join('\n'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.deepEqual(await codexSessionIdentity(session, root), { model: 'gpt-5.6-luna', effort: 'max' });
+  assert.equal(await codexSessionIdentity('not-a-session', root), null);
 });
 
 test('large reviewer prompt spawns locally through stdin instead of argv', async t => {

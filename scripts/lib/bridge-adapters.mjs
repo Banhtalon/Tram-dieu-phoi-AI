@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {writeFile,mkdir,readFile,lstat} from 'node:fs/promises';
+import {writeFile,mkdir,readFile,lstat,readdir} from 'node:fs/promises';
 import {randomUUID,createHash} from 'node:crypto';
 import os from 'node:os';
 import {execute,subscriptionEnv,failureReason,failureStatus,safe} from './bridge-process.mjs';
@@ -14,6 +14,17 @@ const TOOL_EVENT_NAMES=new Set(['tool','tool_call','tool_result','function_call'
 const definitionHash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const agentDefinitionPath=agent=>path.join(os.homedir(),'.gemini','config','agents',agent,'agent.md');
 const protocolError=(code,message)=>Object.assign(Error(message),{code});
+
+export async function codexSessionIdentity(sessionId,sessionsRoot=path.join(os.homedir(),'.codex','sessions')) {
+  if(!/^[0-9a-f-]{36}$/i.test(sessionId??''))return null;
+  const entries=await readdir(sessionsRoot,{recursive:true,withFileTypes:true});
+  const matches=entries.filter(entry=>entry.isFile()&&entry.name.endsWith(`-${sessionId}.jsonl`));
+  if(matches.length!==1)return null;
+  const rows=(await readFile(path.join(matches[0].parentPath,matches[0].name),'utf8')).split(/\r?\n/).filter(Boolean);
+  const contexts=rows.flatMap(line=>{try{const row=JSON.parse(line);return row.type==='turn_context'&&row.payload?.model?[row.payload]:[];}catch{return [];}});
+  const models=[...new Set(contexts.map(row=>row.model))],efforts=[...new Set(contexts.map(row=>row.effort).filter(Boolean))];
+  return models.length===1&&efforts.length===1?{model:models[0],effort:efforts[0]}:null;
+}
 
 export function validateNoToolsAgentDefinition(source,agent) {
   if(typeof source!=='string'||!AGENT_NAME.test(agent??''))return false;
@@ -136,7 +147,7 @@ export async function invoke(binding,options) {
   catch(error){const finished_at=new Date().toISOString();const failed=safe({provider:binding.provider,requested_model:binding.model,requested_effort:binding.effort??null,argv:spec.argv,code:null,reason:error.code?`EXECUTION_THROW:${error.code}`:'EXECUTION_THROW',started_at,finished_at,status:'BLOCKED_TECHNICAL'});await finishInvocation({packetDir:options.packetDir,receiptRoot:options.receiptRoot,role:options.role,receiptKind,binding,prompt:options.prompt,result:failed,started_at,finished_at,context});throw error;}
   const record=safe({provider:binding.provider,requested_model:binding.model,requested_effort:binding.effort??null,argv:spec.argv,code:r.code,reason:failureReason(r),started_at:r.started_at??started_at,finished_at:r.finished_at??new Date().toISOString(),status:failureStatus(r)});Object.assign(record,protocolMetadata(binding.provider,r.stdout,binding.cli??(binding.provider==='openai'?'codex':'antigravity')));
   if(!record.status&&record.denied_actions?.length){record.status='WAITING_CAPABILITY';record.reason='TOOL_PERMISSION_DENIED';}
-  if(!record.status){try{Object.assign(record,parseProtocol(binding.provider,r.stdout,binding.cli??(binding.provider==='openai'?'codex':'antigravity'),{capabilityProbe:receiptKind==='PROBE',expectedModel:['reviewer','elevated_reviewer'].includes(options.role)?binding.model:null,expectedAgent:['reviewer','elevated_reviewer'].includes(options.role)?binding.agent:null}));}catch(error){record.status='BLOCKED_TECHNICAL';record.reason=error.code==='PROTOCOL_GUARD'?`PROTOCOL_GUARD:${error.message}`:'INVALID_PROTOCOL';}}
+  if(!record.status){try{const review=['reviewer','elevated_reviewer'].includes(options.role);const parsed=parseProtocol(binding.provider,r.stdout,binding.cli??(binding.provider==='openai'?'codex':'antigravity'),{capabilityProbe:receiptKind==='PROBE',expectedModel:review&&binding.provider!=='openai'?binding.model:null,expectedAgent:review?binding.agent:null});if(review&&binding.provider==='openai'){const identity=await codexSessionIdentity(parsed.session_id);if(identity?.model!==binding.model||identity?.effort!==binding.effort)throw protocolError('PROTOCOL_GUARD',`Codex session identity does not match '${binding.model}' at '${binding.effort}' effort`);parsed.observed_models=[identity.model];}Object.assign(record,parsed);}catch(error){record.status='BLOCKED_TECHNICAL';record.reason=error.code==='PROTOCOL_GUARD'?`PROTOCOL_GUARD:${error.message}`:'INVALID_PROTOCOL';}}
   await finishInvocation({packetDir:options.packetDir,receiptRoot:options.receiptRoot,role:options.role,receiptKind,binding,prompt:options.prompt,result:record,started_at:record.started_at,finished_at:record.finished_at,context});return record;
 }
 
