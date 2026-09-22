@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lifecycle from './harness-lifecycle.mjs';
 import { freezeControlledTask, assertControlledContract, controlledConfigHash, validateControlledTask } from './controlled-bridge.mjs';
-import { assertSubscriptionSettings, validateReviewerBinding, validateNoToolsAgentDefinition } from './bridge-adapters.mjs';
+import { assertSubscriptionSettings, validateReviewerBinding } from './bridge-adapters.mjs';
 import { assertWorkerIsolation } from './implementation-worker.mjs';
 import { auditSummary } from './harness-observability.mjs';
 
@@ -20,6 +20,11 @@ const writeNew = async (file, value) => writeFile(file, JSON.stringify(value, nu
 const requireValue = (ok, code) => { if (!ok) throw Object.assign(Error(code), { code }); };
 const inside = (root, file) => { const rel = path.relative(root, file); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 const errorCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code ?? '') ? error.code : 'DIRECT_RUN_FAILED';
+const requireDirectReviewer = config => {
+  requireValue(config.reviewer?.provider === 'openai' && config.reviewer?.cli === 'codex' &&
+    config.reviewer?.model === 'gpt-5.6-luna' && config.reviewer?.effort === 'max', 'LUNA_REVIEWER_REQUIRED');
+  requireValue(!config.fallback_reviewer, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
+};
 
 // One host/account writer at a time, as required by the temporary-permissions helper.
 export async function prepareDirect(repo, task, config, output) {
@@ -32,8 +37,7 @@ export async function prepareDirect(repo, task, config, output) {
   config = structuredClone(config);
   requireValue(!config.test_mode && config.worker?.local_trial === true, 'LOCAL_TRIAL_REQUIRED');
   requireValue(config.worker.skip_permissions !== true && config.billing === 'SUBSCRIPTION_ONLY', 'UNSAFE_CONFIG');
-  requireValue(config.reviewer?.provider === 'google' && config.reviewer.model === 'gemini-3.8-flash-high', 'GEMINI_REVIEWER_REQUIRED');
-  requireValue(!config.fallback_reviewer, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
+  requireDirectReviewer(config);
   config.lifecycle = { ...config.lifecycle, max_rework: 2, checkpoint_required: true, control_root: output,
     desired_state_path: '.workflow-local/ai-control.desired_state', lease_seconds: Math.min(3600, (config.timeout_seconds ?? 300) * 4 + 120) };
   assertWorkerIsolation(config, { repoRoot: repo, controlRoot: output });
@@ -76,6 +80,7 @@ export async function checkDirect(manifestPath) {
   requireValue(git(m.repo, 'rev-parse', 'HEAD') === task.base_sha, 'BASE_MISMATCH');
   await assertControlledContract(m.taskPath, task);
   requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
+  requireDirectReviewer(config);
   requireValue(config.lifecycle.max_rework === 2 && config.lifecycle.checkpoint_required === true && !config.fallback_reviewer, 'BUDGET_MISMATCH');
   requireValue(config.worker.local_trial === true && !config.test_mode && !config.worker.skip_permissions, 'UNSAFE_CONFIG');
   assertWorkerIsolation(config, { repoRoot: m.repo, controlRoot: path.dirname(manifestPath) });
@@ -89,8 +94,6 @@ export async function checkDirect(manifestPath) {
   requireValue(Array.isArray(settings.permissions?.allow), 'INVALID_PERMISSIONS');
   requireValue(!config.worker.temporary_permissions.files.some(file => settings.permissions.allow.includes(`write_file(${file})`)), 'EXISTING_TASK_PERMISSION');
   validateReviewerBinding(config.reviewer);
-  const agent = await readFile(path.join(os.homedir(), '.gemini', 'config', 'agents', config.reviewer.agent, 'agent.md'));
-  requireValue(digest(agent) === config.reviewer.agent_definition_sha256 && validateNoToolsAgentDefinition(agent.toString(), config.reviewer.agent), 'AGENT_MISMATCH');
   // Resolve executables without invoking providers or spending a model call.
   for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0]]) {
     if (path.isAbsolute(executable)) await access(executable);

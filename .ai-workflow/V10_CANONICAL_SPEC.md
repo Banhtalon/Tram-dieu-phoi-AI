@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.2 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.3 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -167,12 +167,13 @@ This entrypoint has a stricter per-task budget: one worker execution, at most on
 same-process repair and two independent reviews. It stops on failures or exhausted
 budget; a new task/revision does not authorize another attempt. Worker file scope is
 exact; the controller runs gates, and the worker must not run shell/gates or access
-control files. Default worker and ordinary reviewer remain Gemini 3.8 Flash High.
-The direct entrypoint does not dispatch fallback automatically: only Gemini invocation
-unavailability permits a separately recorded Terra High review within the same total
-review budget. Findings never permit fallback. PASS stops at the Owner checkpoint;
-only explicit Owner acceptance permits `accept`. Forced termination requires manual
-permission/workspace reconciliation before any new dispatch. See `DIRECT_GEMINI.md`.
+control files. The direct workflow requires a Gemini 3.8 Flash High MCP worker to
+implement, controller-run gates to test, an independent OpenAI Codex model gpt-5.6-luna
+at effort max (Luna Max) review, then Owner acceptance at the checkpoint. Luna is
+reviewer only, never worker or runner. The direct entrypoint does not accept or dispatch
+a fallback reviewer. PASS stops at the Owner checkpoint; only explicit Owner acceptance
+permits `accept`. Forced termination requires manual permission/workspace reconciliation
+before any new dispatch. See `DIRECT_GEMINI.md`.
 `GEMINI_FIRST_V1` remains supported for legacy task compatibility rather than as the
 default for newly initialized tasks.
 The controlled lanes are FAST, NORMAL and ELEVATED_PROCESS; risk remains LOW or

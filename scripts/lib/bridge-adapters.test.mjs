@@ -7,6 +7,7 @@ import {
   antigravityReviewerArgs,
   antigravityReviewerInput,
   assertSubscriptionSettings,
+  invocation,
   parseProtocol,
   validateNoToolsAgentDefinition,
   validateReviewerBinding
@@ -56,6 +57,16 @@ test('Gemini reviewer binding builds a guarded plan command', () => {
   assert.equal(args.includes(prompt), false);
   assert.equal(JSON.parse(antigravityReviewerInput(prompt)).message.content, prompt);
   assert.equal(args.includes('--dangerously-skip-permissions'), false);
+});
+
+test('Luna Max reviewer runs through Codex in read-only mode', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qq-luna-reviewer-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const spec = await invocation({ provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-luna', effort: 'max' },
+    { cwd: root, packetDir: root, role: 'reviewer', prompt: 'review', timeoutSeconds: 30 });
+  assert.equal(spec.argv.includes('gpt-5.6-luna'), true);
+  assert.equal(spec.argv.includes('read-only'), true);
+  assert.equal(spec.argv.includes('model_reasoning_effort="max"'), true);
 });
 
 test('large reviewer prompt spawns locally through stdin instead of argv', async t => {
