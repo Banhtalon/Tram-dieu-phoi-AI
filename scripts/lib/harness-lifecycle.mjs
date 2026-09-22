@@ -640,8 +640,8 @@ export function collectChangeset(cwd, allowedPaths = []) {
   return files;
 }
 
-function changeSignature(files, diff) {
-  return hash({ files, diff });
+function changeSignature(files, diff, head) {
+  return hash({ files, diff, head });
 }
 
 async function boundedSourceFile(cwd, name, config) {
@@ -719,12 +719,13 @@ async function fileContents(cwd, files) {
 }
 
 export async function buildChangesetPacket(cwd, task, tests, previousSignature = null) {
+  const head = git(cwd, 'rev-parse', 'HEAD').trim();
   const files = collectChangeset(cwd, task.allowed_paths ?? task.write_paths ?? []);
   const diff = git(cwd, 'diff', '--no-ext-diff', '--no-textconv', '--unified=3', 'HEAD', '--', ...files.map(file => file.path));
   const content = await fileContents(cwd, files);
-  const signature = changeSignature(content.map(({ content: ignored, ...file }) => file), diff + content.map(file => file.content ?? '').join('\n'));
+  const signature = changeSignature(content.map(({ content: ignored, ...file }) => file), diff + content.map(file => file.content ?? '').join('\n'), head);
   if (previousSignature && previousSignature === signature) throw fail('NOOP_REWORK', 'rework did not produce a new changeset');
-  return { changed_files: content, diff, signature };
+  return { changed_files: content, diff, signature, head };
 }
 
 async function snapshotProtected(paths) {
@@ -1218,7 +1219,7 @@ async function buildReviewPacket({ task, state, changeset, reviewId, config }) {
     changed_files: changeset.changed_files.map(({ content: ignored, ...file }) => file),
     changeset_snapshot: {
       signature: changeset.signature,
-      head: git(state.workspace, 'rev-parse', 'HEAD').trim(),
+      head: changeset.head,
       files: changeset.changed_files.map(({ content: ignored, ...file }) => file)
     },
     tests: state.tests,
@@ -1241,8 +1242,9 @@ function reviewInputHash(packet) {
   return hash(input);
 }
 
-function validReviewPacket(packet, state) {
+function validReviewPacket(packet, state, task) {
   if (!packet || packet.schema_version !== REVIEW_PACKET_SCHEMA || packet.task_id !== state.task_id || packet.review_id !== state.review_id ||
+      packet.contract_sha !== task.contract_sha256 || !packet.changeset_snapshot?.head || packet.changeset_snapshot.signature !== state.changeset_signature ||
       packet.changeset_signature !== state.changeset_signature || packet.review_source_sha256 !== state.review_source_sha256 ||
       packet.review_input_sha256 !== state.review_input_sha256 || packet.review_input_sha256 !== reviewInputHash(packet)) return false;
   const source = structuredClone(packet.review_source ?? {});
@@ -1321,7 +1323,7 @@ async function verificationFresh(task, state, config, paths) {
   const source = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
   if (source.sha256 !== state.review_source_sha256) throw fail('REVIEW_STALE', 'declared review source changed after review', { task_id: task.task_id });
   const reviewPacket = await optionalJson(paths.reviewPacketPath);
-  if (!validReviewPacket(reviewPacket, state) || hash(reviewPacket.review_result) !== hash(state.review_result)) {
+  if (!validReviewPacket(reviewPacket, state, task) || hash(reviewPacket.review_result) !== hash(state.review_result)) {
     throw fail('REVIEW_STALE', 'review packet changed after review', { task_id: task.task_id });
   }
   if (requiresProductCheck(task)) {
@@ -1362,7 +1364,7 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
   const claim = await claimFromDisk(paths.taskPath);
   await validateLease(paths.taskPath, { owner, token: claim.lease_token, version: state.lease?.version });
   const packet = await optionalJson(paths.reviewPacketPath);
-  if (!validReviewPacket(packet, state)) {
+  if (!validReviewPacket(packet, state, task)) {
     const error = fail('STATE_CORRUPTION', 'pending review packet is missing or does not match lifecycle state', { task_id: task.task_id });
     await saveState(state, paths, { phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, status: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'review packet is not recoverable' }, error }, claim);
     return resultOf(state);

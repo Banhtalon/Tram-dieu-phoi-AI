@@ -12,6 +12,9 @@ test('source filter accepts identifiers but rejects credential values', () => {
   assert.equal(sourceAllowed('example.mjs', 'API_KEY=[REDACTED]', {}, {}), false);
   assert.equal(sourceAllowed('example.mjs', 'text\u0001binary', {}, {}), false);
   assert.equal(sourceAllowed('example.json', '{"token":"fixture-value"}', {}, {}), false);
+  assert.equal(sourceAllowed('example.json', '{"client_secret":"abcd1234"}', {}, {}), false);
+  assert.equal(sourceAllowed('example.env', 'access_token=token1234', {}, {}), false);
+  assert.equal(sourceAllowed('example.yml', 'secret_key: "fixture-value"', {}, {}), false);
   assert.equal(sourceAllowed('example.env', 'password=hunter42', {}, {}), false);
   assert.equal(sourceAllowed('example.mjs', 'text\u0085binary', {}, {}), false);
   const synthetic = 'const pass' + 'word = "fixture-value";';

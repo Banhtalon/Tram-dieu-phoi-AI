@@ -811,6 +811,16 @@ test('review and checkpoint are invalidated by a changed workspace', async t => 
   await assert.rejects(() => approveCheckpoint({ ...f.options, approvedBy: 'owner-fixture' }), error => error.code === 'REVIEW_STALE');
 });
 
+test('review and checkpoint are invalidated when HEAD changes outside reviewed paths', async t => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  await runHarnessLifecycle(f.options);
+  await writeFile(path.join(f.workspace, 'README.md'), 'outside reviewed paths\n');
+  git(f.workspace, 'add', 'README.md');
+  git(f.workspace, 'commit', '-m', 'outside reviewed paths');
+  await assert.rejects(() => approveCheckpoint({ ...f.options, approvedBy: 'owner-fixture' }), error => error.code === 'REVIEW_STALE');
+});
+
 test('checkpoint rejection is explicit and is not a retry', async t => {
   const f = await fixture();
   t.after(f.cleanup);
