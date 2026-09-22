@@ -43,7 +43,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
   const productRunnerPath = path.join(root, 'product-runner.mjs');
   if (productCheck) {
     await writeFile(productModePath, String(productCheck));
-    await writeFile(productRunnerPath, `import{readFileSync}from'node:fs';const mode=readFileSync(process.argv[2],'utf8').trim();if(mode==='timeout')setTimeout(()=>{},60000);else if(mode==='malformed')console.log('not-json');else console.log(JSON.stringify(mode==='fail'?{status:'FAIL'}:mode==='incomplete'?{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[],action_results:[]}:{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[{criterion_id:'criterion-001',status:'PASS',observed_result:'visible',evidence:'fixture'}],action_results:[{action_id:'action-001',status:'PASS',observed_result:'worked',evidence:'fixture'}]}));`);
+    await writeFile(productRunnerPath, `import{readFileSync}from'node:fs';const mode=readFileSync(process.argv[2],'utf8').trim();if(mode==='timeout')setTimeout(()=>{},60000);else if(mode==='malformed')console.log('not-json');else console.log(JSON.stringify(mode==='fail'?{status:'FAIL'}:mode==='invalid'?{status:'UNKNOWN'}:mode==='incomplete'?{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[],action_results:[]}:{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[{criterion_id:'criterion-001',status:'PASS',observed_result:'visible',evidence:'fixture'}],action_results:[{action_id:'action-001',status:'PASS',observed_result:'worked',evidence:'fixture'}]}));`);
   }
   git(root, 'init');
   git(root, 'config', 'user.email', 'harness-test@example.invalid');
@@ -238,7 +238,7 @@ test('passing Product Check is bound before checkpoint and review packet include
 });
 
 test('Product Check waits without another AI call and verifyProductCheck can finish it', async t => {
-  for (const mode of ['malformed', 'incomplete', 'timeout']) {
+  for (const mode of ['malformed', 'invalid', 'incomplete', 'timeout']) {
     const f = await fixture({ productCheck: mode, bindConfig: true });
     t.after(f.cleanup);
     const first = await runHarnessLifecycle(f.options);
@@ -251,6 +251,18 @@ test('Product Check waits without another AI call and verifyProductCheck can fin
     assert.equal(verified.product_check.status, 'PASS', mode);
     assert.equal(f.worker.calls.length, 1, mode);
     assert.equal(f.reviewerCalls.length, 1, mode);
+  }
+});
+
+test('checkpoint rejects missing or replaced Product Check evidence file', async t => {
+  for (const replacement of [null, { status: 'PASS', task_id: 'stale-task' }]) {
+    const f = await fixture({ productCheck: 'pass', bindConfig: true });
+    t.after(f.cleanup);
+    await runHarnessLifecycle(f.options);
+    const evidencePath = path.join(f.workspace, '.workflow-local', f.id, 'product-check.json');
+    if (replacement) await writeFile(evidencePath, JSON.stringify(replacement));
+    else await rm(evidencePath);
+    await assert.rejects(() => approveCheckpoint({ ...f.options, approvedBy: 'fixture-owner' }), /fresh passing Product Check/);
   }
 });
 
@@ -288,6 +300,8 @@ test('review source rejects missing and oversized declared context', async t => 
   await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['missing.mjs'] }, changeset), /declared review context is missing/);
   await writeFile(path.join(root, 'large.mjs'), 'x'.repeat(256 * 1024 + 1));
   await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['large.mjs'] }, changeset), /bounded regular file|exceeds 256 KiB/);
+  await writeFile(path.join(root, 'binary.mjs'), Buffer.from([0xff, 0xfe, 0xfd]));
+  await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['binary.mjs'] }, changeset), /valid UTF-8 text/);
 });
 
 test('claim success and deterministic second claim rejection', async t => {

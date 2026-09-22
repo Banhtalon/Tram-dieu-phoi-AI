@@ -97,7 +97,7 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
   requireValue(!config.worker.temporary_permissions.files.some(file => settings.permissions.allow.includes(`write_file(${file})`)), 'EXISTING_TASK_PERMISSION');
   validateReviewerBinding(config.reviewer);
   // Resolve executables without invoking providers or spending a model call.
-  for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0], ...(config.product_check?.command?.length ? [config.product_check.command[0]] : [])]) {
+  for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0]]) {
     if (path.isAbsolute(executable)) await access(executable);
     else execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [executable], { stdio: 'pipe', windowsHide: true });
   }

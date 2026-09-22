@@ -659,7 +659,9 @@ async function boundedSourceFile(cwd, name, config) {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', `review source is not a bounded regular file: ${name}`);
   if (!insidePath(await realpath(cwd), await realpath(full))) throw fail('CONTENT_MISMATCH', `review source resolves outside workspace: ${name}`);
-  const content = await readFile(full, 'utf8');
+  let content;
+  try { content = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(full)); }
+  catch { throw fail('CONTENT_MISMATCH', `review source is not valid UTF-8 text: ${name}`); }
   if (!sourceAllowed(name, content, config)) throw fail('CONTENT_MISMATCH', `review source contains binary or secret-like content: ${name}`);
   return { path: name, content, sha256: hash(content) };
 }
@@ -682,14 +684,12 @@ export async function buildReviewSource(cwd, task, config, changeset) {
     if (!current && declared.includes(name)) throw fail('CONTENT_MISMATCH', `declared review context is missing: ${name}`);
     if (current) files.push(current);
     if (changed.includes(name)) {
-      try {
-        if (!git(cwd, 'ls-files', '--', name).trim()) continue;
-        const content = git(cwd, 'show', `HEAD:${name}`);
-        if (!sourceAllowed(name, content, config)) throw fail('CONTENT_MISMATCH', `base review source contains binary or secret-like content: ${name}`);
-        base_files.push({ path: name, content, sha256: hash(content) });
-      } catch (error) {
-        if (error?.code === 'CONTENT_MISMATCH') throw error;
-      }
+      const tracked = git(cwd, 'ls-files', '--stage', '--', name).trim();
+      if (!tracked) continue;
+      if (/^120000\s/.test(tracked)) throw fail('CONTENT_MISMATCH', `base review source is a symlink: ${name}`);
+      const content = git(cwd, 'show', `HEAD:${name}`);
+      if (!sourceAllowed(name, content, config)) throw fail('CONTENT_MISMATCH', `base review source contains binary or secret-like content: ${name}`);
+      base_files.push({ path: name, content, sha256: hash(content) });
     }
   }
   const source = {
@@ -710,7 +710,9 @@ async function fileContents(cwd, files) {
     const full = path.join(cwd, file.path);
     const info = await lstat(full);
     if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', `changed file is not a bounded regular file: ${file.path}`);
-    const content = await readFile(full, 'utf8');
+    let content;
+    try { content = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(full)); }
+    catch { throw fail('CONTENT_MISMATCH', `changed file is not valid UTF-8 text: ${file.path}`); }
     if (!sourceAllowed(file.path, content, { synthetic_source_approvals: [] })) throw fail('CONTENT_MISMATCH', `changed file contains binary or secret-like content: ${file.path}`);
     return { ...file, size: info.size, sha256: hash(content), content };
   }));
@@ -1271,7 +1273,7 @@ async function performProductCheck({ task, state, config, paths, claim, signal }
     await atomicJson(paths.productCheckPath, record); state.product_check = record;
     return { outcome: 'WAIT', record };
   }
-  if (parsed?.status !== 'PASS') {
+  if (parsed?.status === 'FAIL') {
     const record = { ...base, status: 'FAIL', result: parsed, error: 'Product Check reported a functional failure' };
     await atomicJson(paths.productCheckPath, record); state.product_check = record;
     return { outcome: 'BLOCKED', record };
@@ -1288,15 +1290,17 @@ async function performProductCheck({ task, state, config, paths, claim, signal }
   }
 }
 
-async function verificationFresh(task, state, config) {
+async function verificationFresh(task, state, config, paths) {
   const changeset = await buildChangesetPacket(state.workspace, task, state.tests);
   if (changeset.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed after review', { task_id: task.task_id });
   const source = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
   if (source.sha256 !== state.review_source_sha256) throw fail('REVIEW_STALE', 'declared review source changed after review', { task_id: task.task_id });
   if (requiresProductCheck(task)) {
     const pc = state.product_check;
+    const evidence = await optionalJson(paths.productCheckPath);
     if (pc?.status !== 'PASS' || pc.task_id !== task.task_id || pc.revision !== task.revision || pc.contract_sha256 !== task.contract_sha256 ||
-        pc.config_sha256 !== controlledConfigHash(config) || pc.changeset_signature !== state.changeset_signature || pc.review_source_sha256 !== state.review_source_sha256) {
+        pc.config_sha256 !== controlledConfigHash(config) || pc.changeset_signature !== state.changeset_signature || pc.review_source_sha256 !== state.review_source_sha256 ||
+        !evidence || hash(evidence) !== hash(pc)) {
       throw fail('CHECKPOINT_REJECTED', 'checkpoint requires a fresh passing Product Check', { task_id: task.task_id });
     }
   }
@@ -1811,7 +1815,7 @@ export async function approveCheckpoint(options = {}) {
   assertDispatchAllowed(await readDesiredState(state.repo_root, config));
   if (state.phase !== LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT) throw fail('CHECKPOINT_REQUIRED', 'task is not waiting for a checkpoint');
   if (state.review_result?.verdict !== 'PASS' || state.review_result?.risk_checks_completed !== true || state.tests.some(test => test.code !== 0 || test.timed_out || test.interrupted)) throw fail('CHECKPOINT_REJECTED', 'checkpoint requires passing review and tests');
-  await verificationFresh(task, state, config);
+  await verificationFresh(task, state, config, paths);
   const approvedBy = text(options.approvedBy, 'explicit checkpoint approver is required');
   const checkpointId = `checkpoint-${hash(`${task.task_id}:${state.review_id}:${state.changeset_signature}`).slice(0, 32)}`;
   state.checkpoint = {
@@ -1871,7 +1875,7 @@ export async function completeTask(options = {}) {
   if (state.phase !== LIFECYCLE_STATES.CHECKPOINTED || (state.checkpoint.required && !state.checkpoint.approved)) throw fail('CHECKPOINT_REQUIRED', 'completion requires an explicit checkpoint approval', { task_id: task.task_id });
   if (state.review_result?.verdict !== 'PASS' || state.review_result?.risk_checks_completed !== true || state.requested_changes.length > 0 || state.tests.some(test => test.code !== 0 || test.timed_out || test.interrupted)) throw fail('COMPLETION_GUARD', 'completion has unresolved review or test findings');
   if (state.checkpoint.task_id !== task.task_id || state.checkpoint.contract_sha256 !== task.contract_sha256 || state.checkpoint.review_id !== state.review_id || state.checkpoint.changeset_signature !== state.changeset_signature) throw fail('CHECKPOINT_REJECTED', 'checkpoint is bound to a different task, review or changeset', { task_id: task.task_id });
-  await verificationFresh(task, state, config);
+  await verificationFresh(task, state, config, paths);
   await validateLease(options.taskPath, { owner, token: claim.lease_token, version: claim.version });
   const receipt = {
     schema_version: 'qq.workflow.completion-receipt.v1',
