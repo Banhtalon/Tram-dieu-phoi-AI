@@ -197,6 +197,9 @@ export async function verifyProductDirect(manifestPath, signal, api = lifecycle)
 export async function acceptDirect(manifestPath, approvedBy) {
   requireValue(typeof approvedBy === 'string' && approvedBy.trim().length > 0, 'APPROVER_REQUIRED');
   const m = await json(manifestPath), config = await json(m.configPath);
+  const task = await json(m.taskPath);
+  await assertControlledContract(m.taskPath, task);
+  requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
   const state = await json(path.join(m.packetDir, 'state.json'));
   requireValue(['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(state.status), 'CHECKPOINT_NOT_READY');
   if (state.status !== 'COMPLETED') requireValue(state.product_check === null || state.product_check?.status === 'PASS', 'PRODUCT_CHECK_REQUIRED');

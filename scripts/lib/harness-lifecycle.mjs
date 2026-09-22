@@ -1843,6 +1843,7 @@ export async function verifyProductCheck(options = {}) {
 export async function approveCheckpoint(options = {}) {
   const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'checkpoint');
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
   const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
   const state = await stateFor(paths);
   if (!state) throw fail('STATE_MISSING', 'lifecycle state is missing');
@@ -1899,6 +1900,7 @@ export async function rejectCheckpoint(options = {}) {
 export async function completeTask(options = {}) {
   const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'complete');
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
   const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
   const state = await stateFor(paths);
   if (!state) throw fail('STATE_MISSING', 'lifecycle state is missing');

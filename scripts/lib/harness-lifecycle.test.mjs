@@ -704,6 +704,37 @@ test('checkpoint guard blocks completion until explicit approval, then completio
   assert.equal(f.worker.calls.length, 1);
 });
 
+test('checkpoint and completion revalidate frozen task and config, including replay', async t => {
+  const f = await fixture({ bindConfig: true });
+  t.after(f.cleanup);
+  await runHarnessLifecycle(f.options);
+  const original = await readFile(f.taskPath, 'utf8');
+  const options = { ...f.options, approvedBy: 'fixture-owner' };
+  const { acceptDirect } = await import('./direct-run.mjs');
+  const configPath = path.join(f.root, 'accept-config.json');
+  const manifestPath = path.join(f.root, 'accept-manifest.json');
+  await writeFile(configPath, JSON.stringify(f.config));
+  await writeFile(manifestPath, JSON.stringify({ taskPath: f.taskPath, configPath, packetDir: pathsFor(f.taskPath, null, f.id).packetDir }));
+  for (const phase of ['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED']) {
+    const changed = JSON.parse(original);
+    changed.acceptance_criteria = ['changed after review'];
+    await writeFile(f.taskPath, JSON.stringify(changed));
+    await assert.rejects(() => approveCheckpoint(options), /CONTRACT_MISMATCH/);
+    await assert.rejects(() => completeTask(options), /CONTRACT_MISMATCH/);
+    await assert.rejects(() => acceptDirect(manifestPath, 'fixture-owner'), /CONTRACT_MISMATCH/);
+    await writeFile(f.taskPath, original);
+    const config = { ...f.config, timeout_seconds: f.config.timeout_seconds + 1 };
+    await assert.rejects(() => approveCheckpoint({ ...options, config }), error => error.code === 'CONFIG_MISMATCH');
+    await assert.rejects(() => completeTask({ ...options, config }), error => error.code === 'CONFIG_MISMATCH');
+    await writeFile(configPath, JSON.stringify(config));
+    await assert.rejects(() => acceptDirect(manifestPath, 'fixture-owner'), /CONFIG_MISMATCH/);
+    await writeFile(configPath, JSON.stringify(f.config));
+    assert.equal((await inspectTask(f.options)).status, phase);
+    if (phase === 'WAITING_FOR_CHECKPOINT') await approveCheckpoint(options);
+    else assert.equal((await completeTask(options)).status, 'COMPLETED');
+  }
+});
+
 test('replaying continue after a completed review does not call the worker twice', async t => {
   const f = await fixture();
   t.after(f.cleanup);
