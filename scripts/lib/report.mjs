@@ -240,17 +240,13 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const product=productCandidates.find(validProduct)??null;
   const reviewValid=!!review&&review.verdict==='PASS'&&review.independent===true&&review.material_findings.length===0;
   let productNotApplicable=false;
-  if(!identityConflict&&strictlyBound(task,identity)&&task.user_visible===false&&
+  if(!identityConflict&&strictlyBound(task,identity)&&task.schema_version==='qq.workflow.task.v10.1'&&task.user_visible===false&&
       (task.product_checks??task.product_check)?.applicable===false&&
       !productCandidates.some(value=>value!=null&&!validProduct(value))){
     try{
-      if(task.schema_version==='qq.workflow.task.v10.1'){
-        const {assertControlledContract}=await import('./controlled-bridge.mjs');
-        await assertControlledContract(taskPath,task);
-      }else{
-        const {assertContract}=await import('./workflow.mjs');
-        await assertContract(taskPath,task);
-      }
+      // Legacy v10 does not freeze product_check, so it cannot prove non-applicability.
+      const {assertControlledContract}=await import('./controlled-bridge.mjs');
+      await assertControlledContract(taskPath,task);
       productNotApplicable=true;
     }catch{ /* Unreadable or changed frozen contract remains unverified. */ }
   }

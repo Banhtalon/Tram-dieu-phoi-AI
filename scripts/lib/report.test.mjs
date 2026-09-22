@@ -56,6 +56,9 @@ test('Owner report distinguishes frozen non-applicability, review validity and m
   await writeFile(taskPath, JSON.stringify({ ...JSON.parse(originalTask), goal: 'changed after freeze' }));
   assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
   await writeFile(taskPath, originalTask);
+  await writeFile(taskPath, JSON.stringify({ ...JSON.parse(originalTask), schema_version: 'qq.workflow.task.v10' }));
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await writeFile(taskPath, originalTask);
   await write('product_check.json', { ...identity, head: 'c'.repeat(40), status: 'PASS' });
   assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
   await rm(path.join(packet, 'product_check.json'));
