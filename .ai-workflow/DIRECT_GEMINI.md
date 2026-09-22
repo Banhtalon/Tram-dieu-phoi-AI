@@ -8,7 +8,7 @@
 2. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Direct preflight không còn yêu cầu hoặc đọc định nghĩa agent Gemini no-tools, kiểm tra thuê bao Antigravity và quyền ghi tạm thời của worker vẫn giữ nguyên. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
 3. Chạy `prepare`, rồi `check`; hai lệnh này không gọi model. `prepare` tạo task/lock và helper dưới `.workflow-local/direct/<task_id>`, packet bên ngoài repo, giữ nguyên trạng thái paused/stopped. Chỉ hỗ trợ repo chính, không dùng một worktree làm repo nguồn. Thêm `.workflow-local/` vào ignore của repo trước khi chuẩn bị.
 4. Chạy `run` đúng một lần. Tối đa hai lượt worker và hai lượt reviewer, chỉ một repair trong cùng tiến trình. Worker Gemini thực hiện (Gemini implement), controller tự chạy gate (controller tests), và OpenAI Codex Luna Max kiểm tra độc lập (Luna Max independent review). Worker chỉ dùng file tools trên file được giao.
-5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. `WAITING_FOR_CHECKPOINT` nghĩa là kiểm tra đã đạt và đang chờ Owner nghiệm thu (Owner acceptance). Quota/auth/permission/guard/crash dừng; không chạy lại hoặc tạo task mới để né ngân sách.
+5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
 ## Cú pháp PowerShell
@@ -20,6 +20,7 @@ node scripts/direct.mjs prepare $repo $taskJson $configJson $newOutput
 node scripts/direct.mjs check "$newOutput/prepared.json"
 node scripts/direct.mjs run "$newOutput/prepared.json"
 node scripts/direct.mjs status "$newOutput/prepared.json"
+node scripts/direct.mjs verify-product "$newOutput/prepared.json" # Chỉ khi trạng thái PRODUCT_CHECK_WAIT
 # Chỉ sau xác nhận nghiệm thu của Owner:
 node scripts/direct.mjs accept "$newOutput/prepared.json" Owner
 ```
@@ -29,3 +30,5 @@ Mỗi lần chạy tạo báo cáo UUID riêng và một `dispatch.json` chống
 Chỉ một tác vụ được ghi quyền tài khoản trên máy tại một thời điểm. Đóng cưỡng bức có thể bỏ qua cleanup: giữ packet, xác minh worker đã dừng, đối chiếu đúng quyền tạm; không ghi đè toàn bộ settings hoặc tự chạy lại. Không sửa thư mục RESTORE. Các runner R2/WEB cũ là bằng chứng lịch sử, không phải điểm chạy mặc định.
 
 Nếu Codex Luna Max reviewer không gọi được, Điều phối ghi lý do và dừng ở trạng thái chờ hoặc bị chặn; không đổi sang reviewer khác và không tự chạy lại.
+
+Các AI có thể dùng tiếng Anh trong prompt, phát hiện kỹ thuật và bàn giao cho nhau. Điều phối phải trình bày kết quả, trở ngại và bước tiếp theo cho Owner bằng tiếng Việt dễ hiểu; giữ nguyên tên model, mã lỗi, file, lệnh và khóa dữ liệu.

@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.3 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.4 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -28,6 +28,10 @@ REVIEWER: fresh independent session, not involved in any implementation of the
 feature (including its design); assess contract, diff, tests and risk against exact head and contract hash.
 Different provider preferred; a fresh separate session on the same model is allowed
 when competent. Identity is recorded, not authenticated by this local kit.
+Technical handoffs between agents may use English. The Lead communicates every
+Owner-facing result, blocker and next action in plain Vietnamese while preserving
+model names, error codes, file names, commands and data keys. Technical reports are
+source material; the Lead does not paste untranslated prose into the Owner report.
 
 ## Execution identity vocabulary
 Workflow responsibility and execution identity are separate concepts and must not be
@@ -173,7 +177,14 @@ at effort max (Luna Max) review, then Owner acceptance at the checkpoint. Luna i
 reviewer only, never worker or runner. The direct entrypoint does not accept or dispatch
 a fallback reviewer. PASS stops at the Owner checkpoint; only explicit Owner acceptance
 permits `accept`. Forced termination requires manual permission/workspace reconciliation
-before any new dispatch. See `DIRECT_GEMINI.md`.
+before any new dispatch. For a task with `user_visible=true` or an applicable Product
+Check contract, review PASS proceeds to the frozen Product Check before that checkpoint.
+Missing, unavailable, timed-out or malformed evidence remains `PRODUCT_CHECK_WAIT`;
+a functional failure blocks. `verify-product` repeats only this check after revalidating
+the unchanged reviewed source and never dispatches a worker or reviewer. Checkpoint and
+completion revalidate the full declared review source and bound Product Check evidence.
+Review packet v2 includes changed base/head source plus declared gate/context source and
+rejects a complete reviewer prompt over 256 KiB. See `DIRECT_GEMINI.md`.
 `GEMINI_FIRST_V1` remains supported for legacy task compatibility rather than as the
 default for newly initialized tasks.
 The controlled lanes are FAST, NORMAL and ELEVATED_PROCESS; risk remains LOW or
