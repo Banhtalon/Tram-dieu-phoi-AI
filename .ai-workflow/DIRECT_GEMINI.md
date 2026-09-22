@@ -28,4 +28,4 @@ Mỗi lần chạy tạo báo cáo UUID riêng và một `dispatch.json` chống
 
 Chỉ một tác vụ được ghi quyền tài khoản trên máy tại một thời điểm. Đóng cưỡng bức có thể bỏ qua cleanup: giữ packet, xác minh worker đã dừng, đối chiếu đúng quyền tạm; không ghi đè toàn bộ settings hoặc tự chạy lại. Không sửa thư mục RESTORE. Các runner R2/WEB cũ là bằng chứng lịch sử, không phải điểm chạy mặc định.
 
-Nếu Gemini reviewer không gọi được, Điều phối ghi lý do và kiểm tra số lượt còn lại trước khi dùng Terra High theo chính sách. Không dùng fallback cho kết quả NEEDS_FIX, không tự mở phiên Luna.
+Nếu Codex Luna Max reviewer không gọi được, Điều phối ghi lý do và dừng ở trạng thái chờ hoặc bị chặn; không đổi sang reviewer khác và không tự chạy lại.
