@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import { acquire, atomicJson, sourceAllowed } from './bridge.mjs';
 import { git, readJson } from './workflow.mjs';
-import { assertControlledContract, controlledConfigHash } from './controlled-bridge.mjs';
+import { assertControlledContract, controlledConfigHash, resolveProductCheckContract, validateProductCheckResult } from './controlled-bridge.mjs';
 import { runRedacted } from './redact.mjs';
 import { invoke, validateBinding, validateReviewerBinding } from './bridge-adapters.mjs';
 import { AntigravityMcpWorker, assertWorkerIsolation, boundedEvidence } from './implementation-worker.mjs';
@@ -16,7 +16,7 @@ import { auditEvent, auditSummary, operationEvent, transitionFields } from './ha
 
 export const LIFECYCLE_SCHEMA = 'qq.workflow.lifecycle.v1';
 export const CLAIM_SCHEMA = 'qq.workflow.claim.v1';
-export const REVIEW_PACKET_SCHEMA = 'qq.workflow.review-packet.v1';
+export const REVIEW_PACKET_SCHEMA = 'qq.workflow.review-packet.v2';
 export const LIFECYCLE_STATES = Object.freeze({
   INITIALIZED: 'INITIALIZED',
   FROZEN: 'FROZEN',
@@ -26,6 +26,7 @@ export const LIFECYCLE_STATES = Object.freeze({
   READY_FOR_REVIEW: 'READY_FOR_REVIEW',
   REQUEST_CHANGES: 'REQUEST_CHANGES',
   REWORKING: 'REWORKING',
+  PRODUCT_CHECK_WAIT: 'PRODUCT_CHECK_WAIT',
   WAITING_FOR_CHECKPOINT: 'WAITING_FOR_CHECKPOINT',
   CHECKPOINTED: 'CHECKPOINTED',
   COMPLETED: 'COMPLETED',
@@ -205,6 +206,7 @@ export function pathsFor(taskPath, packetDir, taskIdValue) {
     claimPath: task + '.claim.json',
     claimLockPath: task + '.claim.lock.json',
     reviewPacketPath: path.join(requested, 'review-packet.json'),
+    productCheckPath: path.join(requested, 'product-check.json'),
     workerResultPath: path.join(requested, 'worker-result.json'),
     auditPath: path.join(requested, 'audit.jsonl'),
     operationsPath: path.join(requested, 'operations.jsonl'),
@@ -623,7 +625,7 @@ function parseStatus(output) {
 
 function safePath(value) {
   return typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) &&
-    !value.split('/').some(part => part === '..' || part === '.' || part === '') && !/[\x00-\x1f:*?\[\]\\]/.test(value);
+    !value.split('/').some(part => ['..', '.', '', '.git', '.workflow-local'].includes(part)) && !/[\x00-\x1f:*?\[\]\\]/.test(value);
 }
 
 export function collectChangeset(cwd, allowedPaths = []) {
@@ -640,6 +642,66 @@ export function collectChangeset(cwd, allowedPaths = []) {
 
 function changeSignature(files, diff) {
   return hash({ files, diff });
+}
+
+async function boundedSourceFile(cwd, name, config) {
+  if (!safePath(name)) throw fail('CONTENT_MISMATCH', `unsafe review source path: ${name}`);
+  const full = path.resolve(cwd, name);
+  if (!insidePath(cwd, full)) throw fail('CONTENT_MISMATCH', `review source escapes workspace: ${name}`);
+  let cursor = path.resolve(cwd);
+  for (const part of name.split('/')) {
+    cursor = path.join(cursor, part);
+    try { if ((await lstat(cursor)).isSymbolicLink()) throw fail('CONTENT_MISMATCH', `review source uses a symlink or junction: ${name}`); }
+    catch (error) { if (error.code === 'ENOENT') break; throw error; }
+  }
+  let info;
+  try { info = await lstat(full); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', `review source is not a bounded regular file: ${name}`);
+  if (!insidePath(await realpath(cwd), await realpath(full))) throw fail('CONTENT_MISMATCH', `review source resolves outside workspace: ${name}`);
+  const content = await readFile(full, 'utf8');
+  if (!sourceAllowed(name, content, config)) throw fail('CONTENT_MISMATCH', `review source contains binary or secret-like content: ${name}`);
+  return { path: name, content, sha256: hash(content) };
+}
+
+function insidePath(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+export async function buildReviewSource(cwd, task, config, changeset) {
+  const gateArgs = task.gates.flatMap(gate => gate.argv.slice(1)).filter(value => typeof value === 'string' && safePath(value) && /\.(?:[cm]?js|json|py|ps1|sh)$/.test(value));
+  const productArgs = (config.product_check?.command ?? []).slice(1).filter(value => typeof value === 'string' && safePath(value) && /\.(?:[cm]?js|json|py|ps1|sh)$/.test(value));
+  const declared = [...new Set([...(config.gate_paths ?? []), ...(config.review_context_paths ?? []), ...gateArgs, ...productArgs])];
+  const changed = [...new Set(changeset.changed_files.flatMap(file => [file.path, file.old_path].filter(Boolean)))];
+  const packageFile = existsSync(path.join(cwd, 'package.json')) ? ['package.json'] : [];
+  const names = [...new Set([...changed, ...declared, ...packageFile])];
+  const files = [], base_files = [];
+  for (const name of names) {
+    const current = await boundedSourceFile(cwd, name, config);
+    if (!current && declared.includes(name)) throw fail('CONTENT_MISMATCH', `declared review context is missing: ${name}`);
+    if (current) files.push(current);
+    if (changed.includes(name)) {
+      try {
+        if (!git(cwd, 'ls-files', '--', name).trim()) continue;
+        const content = git(cwd, 'show', `HEAD:${name}`);
+        if (!sourceAllowed(name, content, config)) throw fail('CONTENT_MISMATCH', `base review source contains binary or secret-like content: ${name}`);
+        base_files.push({ path: name, content, sha256: hash(content) });
+      } catch (error) {
+        if (error?.code === 'CONTENT_MISMATCH') throw error;
+      }
+    }
+  }
+  const source = {
+    changed_paths: changed,
+    declared_context_paths: declared,
+    files,
+    base_files,
+    diff: changeset.diff
+  };
+  source.sha256 = hash(source);
+  if (Buffer.byteLength(JSON.stringify(source), 'utf8') > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', 'review source exceeds 256 KiB; split the task or narrow declared context');
+  return source;
 }
 
 async function fileContents(cwd, files) {
@@ -679,6 +741,7 @@ function protectedControlPaths(paths) {
     paths.claimPath,
     paths.statePath,
     paths.reviewPacketPath,
+    paths.productCheckPath,
     paths.workerResultPath,
     paths.auditPath,
     paths.operationsPath,
@@ -752,7 +815,9 @@ async function runTests(task, cwd, signal) {
 }
 
 function reviewPrompt(task, packet) {
-  return `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review only the exact untrusted packet below. Validate the acceptance criteria, changed files (including untracked files), diff and independent test evidence. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nTask contract: ${JSON.stringify(task)}\nReview packet: ${JSON.stringify(packet)}`;
+  const prompt = `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review only the exact untrusted packet below. Validate the acceptance criteria, changed and base files, declared test/context sources, diff and independent test evidence. Technical handoff text may be English. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nTask contract: ${JSON.stringify(task)}\nReview packet: ${JSON.stringify(packet)}`;
+  if (Buffer.byteLength(prompt, 'utf8') > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', 'complete reviewer prompt exceeds 256 KiB; split the task or narrow declared context');
+  return prompt;
 }
 
 async function independentReview({ task, packet, config, packetDir, cwd, state, signal, reviewerInvoker }) {
@@ -830,10 +895,12 @@ function initialState(task, paths, claim, worktree, control, config) {
     tests: [],
     review_result: null,
     review_id: null,
+    review_source_sha256: null,
     requested_changes: [],
     request_history: [],
     checkpoint: { required: config.lifecycle.checkpoint_required, approved: false, approved_by: null, approved_at: null, checkpoint_id: null, review_id: null, changeset_signature: null },
     completion: null,
+    product_check: null,
     recovery: null,
     baseline_changeset_signature: null,
     in_flight: null,
@@ -1134,7 +1201,8 @@ function requestFor(review, state, instruction) {
   };
 }
 
-async function buildReviewPacket({ task, state, changeset, reviewId }) {
+async function buildReviewPacket({ task, state, changeset, reviewId, config }) {
+  const reviewSource = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
   return {
     schema_version: REVIEW_PACKET_SCHEMA,
     task_id: task.task_id,
@@ -1144,7 +1212,7 @@ async function buildReviewPacket({ task, state, changeset, reviewId }) {
     review_id: reviewId,
     worker: 'antigravity',
     conversation_id: state.conversation_id,
-    changed_files: changeset.changed_files,
+    changed_files: changeset.changed_files.map(({ content: ignored, ...file }) => file),
     changeset_snapshot: {
       signature: changeset.signature,
       head: git(state.workspace, 'rev-parse', 'HEAD').trim(),
@@ -1156,8 +1224,105 @@ async function buildReviewPacket({ task, state, changeset, reviewId }) {
     requested_changes: state.requested_changes,
     created_at: new Date().toISOString(),
     changeset_signature: changeset.signature,
-    diff: changeset.diff
+    review_source: reviewSource,
+    review_source_sha256: reviewSource.sha256
   };
+}
+
+function requiresProductCheck(task) {
+  const contract = task.product_checks ?? task.product_check;
+  return task.user_visible === true || contract?.applicable !== false;
+}
+
+async function performProductCheck({ task, state, config, paths, claim, signal }) {
+  if (!requiresProductCheck(task)) return { outcome: 'NOT_APPLICABLE', record: null };
+  const command = config.product_check?.command;
+  const startedAt = new Date().toISOString();
+  state.product_check = { status: 'RUNNING', started_at: startedAt, changeset_signature: state.changeset_signature, review_source_sha256: state.review_source_sha256 };
+  await saveState(state, paths, { phase: LIFECYCLE_STATES.PRODUCT_CHECK_WAIT, status: LIFECYCLE_STATES.PRODUCT_CHECK_WAIT, product_check: state.product_check }, claim);
+  if (!Array.isArray(command) || command.length === 0) {
+    const record = { ...state.product_check, status: 'UNVERIFIED', error: 'Product Check command is missing' };
+    await atomicJson(paths.productCheckPath, record);
+    state.product_check = record;
+    return { outcome: 'WAIT', record };
+  }
+  const result = await runRedacted(command, { cwd: state.workspace, timeoutSeconds: config.timeout_seconds ?? 300, signal });
+  const base = {
+    schema_version: 'qq.workflow.product-check-evidence.v1', task_id: task.task_id, revision: task.revision,
+    contract_sha256: task.contract_sha256, config_sha256: controlledConfigHash(config), changeset_signature: state.changeset_signature,
+    review_source_sha256: state.review_source_sha256, command, started_at: startedAt, finished_at: new Date().toISOString(),
+    code: result.code, timed_out: result.timed_out === true, interrupted: result.interrupted === true,
+    stdout: String(result.stdout ?? '').slice(-MAX_TEST_OUTPUT), stderr: String(result.stderr ?? '').slice(-MAX_TEST_OUTPUT), redaction_applied: result.redaction_applied === true
+  };
+  if (result.interrupted) {
+    const record = { ...base, status: 'RECOVERY_REQUIRED', error: 'Product Check was interrupted; reconcile before retry' };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'RECOVERY', record };
+  }
+  if (result.code !== 0 || result.timed_out) {
+    const record = { ...base, status: 'UNVERIFIED', error: result.timed_out ? 'Product Check timed out' : 'Product Check runner was unavailable or failed' };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'WAIT', record };
+  }
+  let parsed;
+  try { parsed = JSON.parse(String(result.stdout ?? '').trim()); }
+  catch {
+    const record = { ...base, status: 'UNVERIFIED', error: 'Product Check output is not valid JSON' };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'WAIT', record };
+  }
+  if (parsed?.status !== 'PASS') {
+    const record = { ...base, status: 'FAIL', result: parsed, error: 'Product Check reported a functional failure' };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'BLOCKED', record };
+  }
+  try {
+    const validated = validateProductCheckResult(parsed, resolveProductCheckContract(task.product_checks ?? task.product_check));
+    const record = { ...base, status: 'PASS', target_url: validated.target_url, criterion_results: validated.criterion_results, action_results: validated.action_results };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'PASS', record };
+  } catch (error) {
+    const record = { ...base, status: 'UNVERIFIED', error: error.message };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'WAIT', record };
+  }
+}
+
+async function verificationFresh(task, state, config) {
+  const changeset = await buildChangesetPacket(state.workspace, task, state.tests);
+  if (changeset.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed after review', { task_id: task.task_id });
+  const source = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
+  if (source.sha256 !== state.review_source_sha256) throw fail('REVIEW_STALE', 'declared review source changed after review', { task_id: task.task_id });
+  if (requiresProductCheck(task)) {
+    const pc = state.product_check;
+    if (pc?.status !== 'PASS' || pc.task_id !== task.task_id || pc.revision !== task.revision || pc.contract_sha256 !== task.contract_sha256 ||
+        pc.config_sha256 !== controlledConfigHash(config) || pc.changeset_signature !== state.changeset_signature || pc.review_source_sha256 !== state.review_source_sha256) {
+      throw fail('CHECKPOINT_REJECTED', 'checkpoint requires a fresh passing Product Check', { task_id: task.task_id });
+    }
+  }
+  return changeset;
+}
+
+async function moveAfterPassingReview({ task, state, config, paths, claim, signal }) {
+  const checked = await performProductCheck({ task, state, config, paths, claim, signal });
+  if (checked.outcome === 'PASS' || checked.outcome === 'NOT_APPLICABLE') {
+    state.phase = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
+    state.status = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
+    state.error = null;
+  } else if (checked.outcome === 'WAIT') {
+    state.phase = LIFECYCLE_STATES.PRODUCT_CHECK_WAIT;
+    state.status = LIFECYCLE_STATES.PRODUCT_CHECK_WAIT;
+    state.error = errorRecord(fail('CHECKPOINT_REQUIRED', checked.record.error, { task_id: task.task_id }), { taskId: task.task_id });
+  } else if (checked.outcome === 'RECOVERY') {
+    state.phase = LIFECYCLE_STATES.RECOVERY_REQUIRED;
+    state.status = LIFECYCLE_STATES.RECOVERY_REQUIRED;
+    state.recovery = { required: true, reason: 'product_check_interrupted' };
+    state.error = errorRecord(fail('RECOVERY_REQUIRED', checked.record.error, { task_id: task.task_id }), { taskId: task.task_id });
+  } else {
+    state.phase = LIFECYCLE_STATES.BLOCKED;
+    state.status = LIFECYCLE_STATES.BLOCKED;
+    state.error = errorRecord(fail('CHECKPOINT_REJECTED', checked.record.error, { task_id: task.task_id }), { taskId: task.task_id });
+  }
 }
 
 async function reviewPendingAttempt({ task, paths, state, config, owner, reviewerInvoker, signal }) {
@@ -1172,6 +1337,12 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
   const current = await buildChangesetPacket(state.workspace, task, state.tests);
   if (current.signature !== packet.changeset_signature) {
     const error = fail('REVIEW_STALE', 'workspace changed while review was paused', { task_id: task.task_id });
+    await saveState(state, paths, { phase: LIFECYCLE_STATES.READY_FOR_REVIEW, status: LIFECYCLE_STATES.READY_FOR_REVIEW, pending_review: true, error }, claim);
+    return resultOf(state);
+  }
+  const currentSource = await buildReviewSource(state.workspace, task, config, { ...current, tests: state.tests });
+  if (packet.schema_version !== REVIEW_PACKET_SCHEMA || currentSource.sha256 !== packet.review_source_sha256) {
+    const error = fail('REVIEW_STALE', 'review source changed while review was paused', { task_id: task.task_id });
     await saveState(state, paths, { phase: LIFECYCLE_STATES.READY_FOR_REVIEW, status: LIFECYCLE_STATES.READY_FOR_REVIEW, pending_review: true, error }, claim);
     return resultOf(state);
   }
@@ -1198,8 +1369,7 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
       state.status = LIFECYCLE_STATES.REQUEST_CHANGES;
     }
   } else if (review.verdict === 'PASS' && state.tests.every(test => test.code === 0 && !test.timed_out && !test.interrupted)) {
-    state.phase = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
-    state.status = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
+    await moveAfterPassingReview({ task, state, config, paths, claim, signal });
   } else {
     state.phase = LIFECYCLE_STATES.BLOCKED;
     state.status = LIFECYCLE_STATES.BLOCKED;
@@ -1354,7 +1524,8 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   if (afterWorkerControl.state !== 'running') {
     const reviewId = reviewIdFor(task, state.attempt, state.rework_count);
     state.review_id = reviewId;
-    const pendingPacket = await buildReviewPacket({ task, state, changeset, reviewId });
+    const pendingPacket = await buildReviewPacket({ task, state, changeset, reviewId, config });
+    state.review_source_sha256 = pendingPacket.review_source_sha256;
     await writeFencedJson(paths, paths.reviewPacketPath, pendingPacket, claim, state.state_revision);
     await saveState(state, paths, {
       phase: LIFECYCLE_STATES.PAUSED,
@@ -1369,7 +1540,8 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   }
   const reviewId = reviewIdFor(task, state.attempt, state.rework_count);
   state.review_id = reviewId;
-  const packet = await buildReviewPacket({ task, state, changeset, reviewId });
+  const packet = await buildReviewPacket({ task, state, changeset, reviewId, config });
+  state.review_source_sha256 = packet.review_source_sha256;
   await saveState(state, paths, { phase: LIFECYCLE_STATES.READY_FOR_REVIEW, status: LIFECYCLE_STATES.READY_FOR_REVIEW, review_id: reviewId, pending_review: true }, claim);
   const reviewProtectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
   const review = await independentReview({ task, packet, config, packetDir: paths.packetDir, cwd: state.workspace, state, signal, reviewerInvoker });
@@ -1399,8 +1571,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
     }
   } else if (review.verdict === 'PASS' && testRun.status === 'PASS') {
     state.requested_changes = [];
-    state.phase = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
-    state.status = LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT;
+    await moveAfterPassingReview({ task, state, config, paths, claim, signal });
   } else {
     state.phase = LIFECYCLE_STATES.BLOCKED;
     state.status = LIFECYCLE_STATES.BLOCKED;
@@ -1431,6 +1602,7 @@ export async function runHarnessLifecycle(options = {}) {
       return { ...resultOf(state), status: LIFECYCLE_STATES.RECOVERY_REQUIRED, phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'in-flight operation has no trusted completion result', operation_id: state.in_flight?.id ?? null }, error: errorRecord(error, { taskId: task.task_id, operation: state.in_flight?.id ?? null }) };
     }
     if (state.phase === LIFECYCLE_STATES.REWORKING) return options.resume ? continueHarnessLifecycle(options) : resultOf(state);
+    if (state.phase === LIFECYCLE_STATES.PRODUCT_CHECK_WAIT) return resultOf(state);
     if (state.phase === LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT || state.phase === LIFECYCLE_STATES.CHECKPOINTED) return resultOf(state);
   }
   const owner = ownerOf(options, state, config);
@@ -1596,6 +1768,35 @@ export async function continueHarnessLifecycle(options = {}) {
   }
 }
 
+export async function verifyProductCheck(options = {}) {
+  const task = await loadTask(options.taskPath, 'verify-product');
+  await assertLifecycleConfigBinding(options.taskPath, task, options.config);
+  const config = lifecycleConfig(options.config);
+  const paths = pathsFor(options.taskPath, options.packetDir, task.task_id);
+  const state = await stateFor(paths);
+  if (!state) throw fail('STATE_MISSING', 'lifecycle state is missing');
+  if (state.phase !== LIFECYCLE_STATES.PRODUCT_CHECK_WAIT) throw fail('CHECKPOINT_NOT_READY', 'task is not waiting for Product Check');
+  const owner = ownerOf(options, state, config);
+  const claim = await claimFromDisk(options.taskPath);
+  await validateLease(options.taskPath, { owner, token: claim.lease_token, version: state.lease?.version });
+  if (state.product_check?.status === 'RUNNING') {
+    const error = fail('RECOVERY_REQUIRED', 'previous Product Check ended without a trusted result', { task_id: task.task_id });
+    await saveState(state, paths, { phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, status: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'product_check_outcome_unknown' }, error }, claim);
+    return resultOf(state);
+  }
+  if (state.review_result?.verdict !== 'PASS' || state.review_result?.risk_checks_completed !== true) throw fail('CHECKPOINT_REJECTED', 'Product Check requires a passing independent review');
+  assertDispatchAllowed(await readDesiredState(state.repo_root, config));
+  const changeset = await buildChangesetPacket(state.workspace, task, state.tests);
+  if (changeset.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed before Product Check', { task_id: task.task_id });
+  const source = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
+  if (source.sha256 !== state.review_source_sha256) throw fail('REVIEW_STALE', 'declared review source changed before Product Check', { task_id: task.task_id });
+  await moveAfterPassingReview({ task, state, config, paths, claim, signal: options.signal });
+  await saveState(state, paths, { phase: state.phase, status: state.status, product_check: state.product_check, error: state.error ?? null }, claim);
+  await operationEvent(paths.packetDir, 'product_check_completed', transitionFields(state, { result: state.product_check?.status ?? 'NOT_APPLICABLE', error_code: state.error?.code ?? null }));
+  await auditEvent(paths.packetDir, 'product_check_completed', transitionFields(state, { result: state.product_check?.status ?? 'NOT_APPLICABLE', error_code: state.error?.code ?? null }));
+  return resultOf(state);
+}
+
 export async function approveCheckpoint(options = {}) {
   const config = lifecycleConfig(options.config);
   const task = await loadTask(options.taskPath, 'checkpoint');
@@ -1610,8 +1811,7 @@ export async function approveCheckpoint(options = {}) {
   assertDispatchAllowed(await readDesiredState(state.repo_root, config));
   if (state.phase !== LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT) throw fail('CHECKPOINT_REQUIRED', 'task is not waiting for a checkpoint');
   if (state.review_result?.verdict !== 'PASS' || state.review_result?.risk_checks_completed !== true || state.tests.some(test => test.code !== 0 || test.timed_out || test.interrupted)) throw fail('CHECKPOINT_REJECTED', 'checkpoint requires passing review and tests');
-  const current = await buildChangesetPacket(state.workspace, task, state.tests);
-  if (current.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed before checkpoint approval', { task_id: task.task_id });
+  await verificationFresh(task, state, config);
   const approvedBy = text(options.approvedBy, 'explicit checkpoint approver is required');
   const checkpointId = `checkpoint-${hash(`${task.task_id}:${state.review_id}:${state.changeset_signature}`).slice(0, 32)}`;
   state.checkpoint = {
@@ -1671,8 +1871,7 @@ export async function completeTask(options = {}) {
   if (state.phase !== LIFECYCLE_STATES.CHECKPOINTED || (state.checkpoint.required && !state.checkpoint.approved)) throw fail('CHECKPOINT_REQUIRED', 'completion requires an explicit checkpoint approval', { task_id: task.task_id });
   if (state.review_result?.verdict !== 'PASS' || state.review_result?.risk_checks_completed !== true || state.requested_changes.length > 0 || state.tests.some(test => test.code !== 0 || test.timed_out || test.interrupted)) throw fail('COMPLETION_GUARD', 'completion has unresolved review or test findings');
   if (state.checkpoint.task_id !== task.task_id || state.checkpoint.contract_sha256 !== task.contract_sha256 || state.checkpoint.review_id !== state.review_id || state.checkpoint.changeset_signature !== state.changeset_signature) throw fail('CHECKPOINT_REJECTED', 'checkpoint is bound to a different task, review or changeset', { task_id: task.task_id });
-  const current = await buildChangesetPacket(state.workspace, task, state.tests);
-  if (current.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed after review/checkpoint', { task_id: task.task_id });
+  await verificationFresh(task, state, config);
   await validateLease(options.taskPath, { owner, token: claim.lease_token, version: claim.version });
   const receipt = {
     schema_version: 'qq.workflow.completion-receipt.v1',
@@ -1785,7 +1984,9 @@ export async function reconcileTask(options = {}) {
   if (tests.status !== 'PASS') state.error = errorRecord(fail('WORKER_EXECUTION_FAILED', 'reconciled execution has failing independent tests', { task_id: task.task_id }), { taskId: task.task_id });
   const reviewId = reviewIdFor(task, state.attempt, state.rework_count);
   state.review_id = reviewId;
-  await writeFencedJson(paths, paths.reviewPacketPath, await buildReviewPacket({ task, state, changeset, reviewId }), claim, state.state_revision);
+  const reviewPacket = await buildReviewPacket({ task, state, changeset, reviewId, config });
+  state.review_source_sha256 = reviewPacket.review_source_sha256;
+  await writeFencedJson(paths, paths.reviewPacketPath, reviewPacket, claim, state.state_revision);
   await saveState(state, paths, { phase: state.phase, status: state.status, pending_review: state.phase === LIFECYCLE_STATES.READY_FOR_REVIEW, error: state.error ?? null }, claim);
   await operationEvent(paths.packetDir, 'execution_reconciled', transitionFields(state, { result: 'READY_FOR_REVIEW' }));
   await auditEvent(paths.packetDir, 'execution_reconciled', transitionFields(state, { result: 'READY_FOR_REVIEW' }));

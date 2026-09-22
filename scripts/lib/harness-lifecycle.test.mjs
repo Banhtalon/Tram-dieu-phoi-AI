@@ -28,6 +28,8 @@ import {
   runHarnessLifecycle,
   saveState,
   releaseLease,
+  verifyProductCheck,
+  buildReviewSource,
   validateLease,
   renewLease
 } from './harness-lifecycle.mjs';
@@ -35,8 +37,14 @@ import {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 let serial = 0;
 
-async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions } = {}) {
+async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions, productCheck = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qq-harness-lifecycle-'));
+  const productModePath = path.join(root, 'product-mode.txt');
+  const productRunnerPath = path.join(root, 'product-runner.mjs');
+  if (productCheck) {
+    await writeFile(productModePath, String(productCheck));
+    await writeFile(productRunnerPath, `import{readFileSync}from'node:fs';const mode=readFileSync(process.argv[2],'utf8').trim();if(mode==='timeout')setTimeout(()=>{},60000);else if(mode==='malformed')console.log('not-json');else console.log(JSON.stringify(mode==='fail'?{status:'FAIL'}:mode==='incomplete'?{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[],action_results:[]}:{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[{criterion_id:'criterion-001',status:'PASS',observed_result:'visible',evidence:'fixture'}],action_results:[{action_id:'action-001',status:'PASS',observed_result:'worked',evidence:'fixture'}]}));`);
+  }
   git(root, 'init');
   git(root, 'config', 'user.email', 'harness-test@example.invalid');
   git(root, 'config', 'user.name', 'Harness Test');
@@ -71,7 +79,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
         : 'process.exit(0)'],
       timeout_seconds: 20
     }],
-    user_visible: false,
+    user_visible: Boolean(productCheck),
     risk: 'LOW',
     complexity: 'SIMPLE',
     execution: { policy: 'CONTROLLED_DELEGATION_V1' },
@@ -80,7 +88,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
     lane: 'NORMAL',
     initial_lane: 'NORMAL',
     initial_risk: 'LOW',
-    product_check: { applicable: false, reason: 'test-only task' },
+    product_check: productCheck ? { applicable: true, target_url: 'http://localhost:4173', criteria: ['visible'], actions: ['worked'] } : { applicable: false, reason: 'test-only task' },
     candidate_head: null,
     contract_sha256: null
   };
@@ -93,7 +101,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
     schema_version: 'qq.bridge.v2',
     billing: 'SUBSCRIPTION_ONLY',
     mode: 'ASSISTED',
-    timeout_seconds: 30,
+    timeout_seconds: productCheck === 'timeout' ? 1 : 30,
     write_paths: task.write_paths,
     gate_paths: ['test_demo.py'],
     worker: {
@@ -118,6 +126,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
     },
     test_mode: true
   };
+  if (productCheck && productCheck !== 'missing') config.product_check = { command: [process.execPath, productRunnerPath, productModePath] };
   if (temporaryPermissions) {
     config.worker.temporary_permissions = {
       enabled: true,
@@ -127,10 +136,10 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
   }
   await freezeControlledTask(taskPath, task, bindConfig ? config : null);
   const reviewerCalls = [];
-  const reviewer = async ({ state }) => {
+  const reviewer = async ({ state, packet }) => {
     if (settingsPath) permissionObservations.push({ phase: 'review', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
     const verdict = reviewerVerdicts[Math.min(reviewerCalls.length, reviewerVerdicts.length - 1)];
-    reviewerCalls.push({ verdict, attempt: state.attempt });
+    reviewerCalls.push({ verdict, attempt: state.attempt, packet });
     return {
       code: 0,
       session_id: `codex-review-${reviewerCalls.length}`,
@@ -184,7 +193,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
   };
   const options = { taskPath, config, owner: 'fixture-owner', worker, reviewerInvoker: reviewer };
   return {
-    root, id, base, workspace, worktreeRoot, taskPath, controlPath, config, worker, reviewerCalls, permissionObservations, settingsPath, gateObservationPath, options,
+    root, id, base, workspace, worktreeRoot, taskPath, controlPath, config, worker, reviewerCalls, permissionObservations, settingsPath, gateObservationPath, productModePath, options,
     async cleanup() { await rm(root, { recursive: true, force: true }); }
   };
 }
@@ -211,6 +220,75 @@ function waitForChild(child) {
     child.once('close', (code, signal) => resolve({ code, signal, stderr }));
   });
 }
+
+test('passing Product Check is bound before checkpoint and review packet includes declared source', async t => {
+  const f = await fixture({ productCheck: 'pass', bindConfig: true });
+  t.after(f.cleanup);
+  const result = await runHarnessLifecycle(f.options);
+  assert.equal(result.status, LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT);
+  assert.equal(result.product_check.status, 'PASS');
+  assert.equal(f.worker.calls.length, 1);
+  assert.equal(f.reviewerCalls.length, 1);
+  const source = f.reviewerCalls[0].packet.review_source;
+  assert.equal(f.reviewerCalls[0].packet.schema_version, 'qq.workflow.review-packet.v2');
+  assert.deepEqual(source.changed_paths.sort(), ['demo.py', 'test_demo.py']);
+  assert(source.files.some(file => file.path === 'test_demo.py' && file.content.includes('assert True')));
+  await approveCheckpoint({ ...f.options, approvedBy: 'fixture-owner' });
+  assert.equal((await completeTask(f.options)).status, LIFECYCLE_STATES.COMPLETED);
+});
+
+test('Product Check waits without another AI call and verifyProductCheck can finish it', async t => {
+  for (const mode of ['malformed', 'incomplete', 'timeout']) {
+    const f = await fixture({ productCheck: mode, bindConfig: true });
+    t.after(f.cleanup);
+    const first = await runHarnessLifecycle(f.options);
+    assert.equal(first.status, LIFECYCLE_STATES.PRODUCT_CHECK_WAIT, mode);
+    assert.equal(f.worker.calls.length, 1, mode);
+    assert.equal(f.reviewerCalls.length, 1, mode);
+    await writeFile(f.productModePath, 'pass');
+    const verified = await verifyProductCheck(f.options);
+    assert.equal(verified.status, LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT, mode);
+    assert.equal(verified.product_check.status, 'PASS', mode);
+    assert.equal(f.worker.calls.length, 1, mode);
+    assert.equal(f.reviewerCalls.length, 1, mode);
+  }
+});
+
+test('missing Product Check command waits, functional failure blocks, and stale source cannot be verified', async t => {
+  const missing = await fixture({ productCheck: 'missing', bindConfig: true });
+  t.after(missing.cleanup);
+  assert.equal((await runHarnessLifecycle(missing.options)).status, LIFECYCLE_STATES.PRODUCT_CHECK_WAIT);
+
+  const failed = await fixture({ productCheck: 'fail', bindConfig: true });
+  t.after(failed.cleanup);
+  assert.equal((await runHarnessLifecycle(failed.options)).status, LIFECYCLE_STATES.BLOCKED);
+
+  const stale = await fixture({ productCheck: 'malformed', bindConfig: true });
+  t.after(stale.cleanup);
+  assert.equal((await runHarnessLifecycle(stale.options)).status, LIFECYCLE_STATES.PRODUCT_CHECK_WAIT);
+  await writeFile(path.join(stale.workspace, 'test_demo.py'), 'assert True\n# changed after review\n');
+  await writeFile(stale.productModePath, 'pass');
+  await assert.rejects(() => verifyProductCheck(stale.options), /changed before Product Check/);
+});
+
+test('review source rejects missing and oversized declared context', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'qq-review-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  git(root, 'init'); git(root, 'config', 'user.email', 'review@example.invalid'); git(root, 'config', 'user.name', 'Review Source');
+  await writeFile(path.join(root, 'app.mjs'), 'export const value = 1;\n');
+  await writeFile(path.join(root, 'test.mjs'), 'assert(true);\n');
+  await writeFile(path.join(root, 'package.json'), '{}\n');
+  git(root, 'add', '.'); git(root, 'commit', '-m', 'base');
+  await writeFile(path.join(root, 'app.mjs'), 'export const value = 2;\n');
+  const task = { gates: [{ argv: [process.execPath, 'test.mjs'] }] };
+  const changeset = { changed_files: [{ path: 'app.mjs', status: 'modified' }], diff: git(root, 'diff'), tests: [] };
+  const source = await buildReviewSource(root, task, { gate_paths: ['test.mjs'], review_context_paths: [] }, changeset);
+  assert(source.files.some(file => file.path === 'app.mjs'));
+  assert(source.base_files.some(file => file.path === 'app.mjs' && file.content.includes('value = 1')));
+  await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['missing.mjs'] }, changeset), /declared review context is missing/);
+  await writeFile(path.join(root, 'large.mjs'), 'x'.repeat(256 * 1024 + 1));
+  await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['large.mjs'] }, changeset), /bounded regular file|exceeds 256 KiB/);
+});
 
 test('claim success and deterministic second claim rejection', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'qq-claim-'));

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { prepareDirect, checkDirect, runBounded, runDirect } from './direct-run.mjs';
+import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect } from './direct-run.mjs';
 import * as lifecycle from './harness-lifecycle.mjs';
 import { freezeControlledTask } from './controlled-bridge.mjs';
 
@@ -72,6 +72,17 @@ test('real preparation/layout + lifecycle fake boundary, missing helper and paus
     reviewerInvoker: async () => { assert.equal(await readFile(settings, 'utf8'), settingsBytes); reviews++; return { code: 0, session_id: `synthetic-review-${reviews}`, observed_models: [config.reviewer.model], result: { verdict: reviews === 1 ? 'NEEDS_FIX' : 'PASS', summary: 'fixture', material_findings: reviews === 1 ? ['check content'] : [], risk_checks_completed: true } }; } });
   assert.equal(final.status, 'WAITING_FOR_CHECKPOINT'); assert.deepEqual(calls, ['execute', 'continue']); assert.equal(reviews, 2);
   assert.equal(await readFile(settings, 'utf8'), settingsBytes);
+  const statePath = path.join(m.packetDir, 'state.json');
+  const waiting = JSON.parse(await readFile(statePath, 'utf8'));
+  waiting.status = 'PRODUCT_CHECK_WAIT'; waiting.phase = 'PRODUCT_CHECK_WAIT';
+  await writeFile(statePath, JSON.stringify(waiting, null, 2) + '\n');
+  let verificationCalls = 0;
+  const verified = await verifyProductDirect(manifest, undefined, {
+    async claimTask() { return { status: 'ALREADY_CLAIMED' }; },
+    async verifyProductCheck() { verificationCalls++; return { status: 'WAITING_FOR_CHECKPOINT', task_id: task.task_id, product_check: { status: 'PASS' } }; }
+  });
+  assert.deepEqual(verified, { status: 'WAITING_FOR_CHECKPOINT', task_id: task.task_id, product_check: 'PASS', provider_invocations: 0 });
+  assert.equal(verificationCalls, 1);
 });
 
 test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Luna model/effort bindings, and fallback reviewer', async t => {

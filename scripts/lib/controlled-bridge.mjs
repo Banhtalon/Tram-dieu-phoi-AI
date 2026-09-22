@@ -151,7 +151,7 @@ export function isEligibleWorkerFallback(workerResult) {
 const PRODUCT_CHECK_RESULT_SCHEMA = 'qq.workflow.product-check-result.v1';
 const PRODUCT_CHECK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-function resolveProductCheckContract(pc) {
+export function resolveProductCheckContract(pc) {
   const resolveItems = (items, kind) => {
     if (!Array.isArray(items) || items.length === 0) {
       throw Error(`product_check requires non-empty ${kind === 'criterion' ? 'criteria' : 'actions'} array`);
@@ -197,7 +197,7 @@ function resolveProductCheckContract(pc) {
   };
 }
 
-function validateProductCheckResult(result, contract) {
+export function validateProductCheckResult(result, contract) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     throw Error('Product check output must be a JSON object');
   }

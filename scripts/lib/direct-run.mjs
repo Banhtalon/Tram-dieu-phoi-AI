@@ -73,7 +73,7 @@ export async function prepareDirect(repo, task, config, output) {
   return manifest;
 }
 
-export async function checkDirect(manifestPath) {
+export async function checkDirect(manifestPath, { allowExisting = false } = {}) {
   const m = await json(manifestPath), task = await json(m.taskPath), config = await json(m.configPath);
   requireValue(inside(m.repo, m.taskPath), 'TASK_OUTSIDE_REPO');
   requireValue(git(path.dirname(m.taskPath), 'rev-parse', '--show-toplevel').toLowerCase() === m.repo.replaceAll('\\', '/').toLowerCase(), 'TASK_REPO_MISMATCH');
@@ -85,8 +85,10 @@ export async function checkDirect(manifestPath) {
   requireValue(config.worker.local_trial === true && !config.test_mode && !config.worker.skip_permissions, 'UNSAFE_CONFIG');
   assertWorkerIsolation(config, { repoRoot: m.repo, controlRoot: path.dirname(manifestPath) });
   requireValue((await lifecycle.readDesiredState(m.repo, config)).state === 'running', 'DESIRED_STATE_BLOCKED');
-  requireValue(!existsSync(path.join(m.packetDir, 'state.json')), 'EXISTING_RUN_REQUIRES_DECISION');
-  requireValue(!existsSync(path.join(path.dirname(path.resolve(manifestPath)), 'dispatch.json')), 'EXISTING_RUN_REQUIRES_DECISION');
+  if (!allowExisting) {
+    requireValue(!existsSync(path.join(m.packetDir, 'state.json')), 'EXISTING_RUN_REQUIRES_DECISION');
+    requireValue(!existsSync(path.join(path.dirname(path.resolve(manifestPath)), 'dispatch.json')), 'EXISTING_RUN_REQUIRES_DECISION');
+  }
   requireValue(digest(await readFile(config.worker.command[1])) === m.helper_sha256, 'HELPER_CHANGED');
   requireValue(m.helper_sha256 === digest(await readFile(path.join(sourceRoot, 'mcp', 'antigravity_server.py'))), 'HELPER_SOURCE_MISMATCH');
   const settings = await json(config.worker.temporary_permissions.settingsPath);
@@ -95,7 +97,7 @@ export async function checkDirect(manifestPath) {
   requireValue(!config.worker.temporary_permissions.files.some(file => settings.permissions.allow.includes(`write_file(${file})`)), 'EXISTING_TASK_PERMISSION');
   validateReviewerBinding(config.reviewer);
   // Resolve executables without invoking providers or spending a model call.
-  for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0]]) {
+  for (const executable of [config.worker.command[0], config.worker.cli ?? 'agy', config.reviewer.command[0], ...(config.product_check?.command?.length ? [config.product_check.command[0]] : [])]) {
     if (path.isAbsolute(executable)) await access(executable);
     else execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [executable], { stdio: 'pipe', windowsHide: true });
   }
@@ -141,6 +143,7 @@ export async function runDirect(manifestPath, signal) {
           const saved = await json(path.join(m.packetDir, 'state.json'));
           report.worker_attempts_completed = saved.attempt; report.repairs = saved.rework_count;
           report.review = saved.review_result?.verdict ?? null;
+          report.product_check = saved.product_check?.status ?? (saved.product_check === null ? 'NOT_APPLICABLE' : null);
           report.worker_requested_model = config.worker.model;
           report.worker_model = saved.latest_execution?.observed_model ?? null;
           report.worker_session = saved.conversation_id ?? null;
@@ -178,7 +181,17 @@ export async function statusDirect(manifestPath) {
   const m = await json(manifestPath);
   const state = await json(path.join(m.packetDir, 'state.json'));
   return { status: state.status, task_id: state.task_id, attempts: state.attempt, repairs: state.rework_count,
-    review: state.review_result?.verdict ?? null, approved: state.checkpoint?.approved === true };
+    review: state.review_result?.verdict ?? null, product_check: state.product_check?.status ?? (state.product_check === null ? 'NOT_APPLICABLE' : null), approved: state.checkpoint?.approved === true };
+}
+
+export async function verifyProductDirect(manifestPath, signal, api = lifecycle) {
+  const { manifest: m, config } = await checkDirect(manifestPath, { allowExisting: true });
+  const state = await json(path.join(m.packetDir, 'state.json'));
+  requireValue(state.status === 'PRODUCT_CHECK_WAIT', 'PRODUCT_CHECK_NOT_WAITING');
+  const claim = await api.claimTask(m.taskPath, { owner: state.owner, leaseSeconds: 300 });
+  requireValue(['CLAIMED', 'ALREADY_CLAIMED'].includes(claim.status), 'CLAIM_FAILED');
+  const result = await api.verifyProductCheck({ taskPath: m.taskPath, packetDir: m.packetDir, config, owner: state.owner, signal });
+  return { status: result.status, task_id: result.task_id, product_check: result.product_check?.status ?? null, provider_invocations: 0 };
 }
 
 export async function acceptDirect(manifestPath, approvedBy) {
@@ -186,6 +199,7 @@ export async function acceptDirect(manifestPath, approvedBy) {
   const m = await json(manifestPath), config = await json(m.configPath);
   const state = await json(path.join(m.packetDir, 'state.json'));
   requireValue(['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(state.status), 'CHECKPOINT_NOT_READY');
+  if (state.status !== 'COMPLETED') requireValue(state.product_check === null || state.product_check?.status === 'PASS', 'PRODUCT_CHECK_REQUIRED');
   if (state.status !== 'COMPLETED') {
     const claim = await lifecycle.claimTask(m.taskPath, { owner: state.owner, leaseSeconds: 300 });
     requireValue(['CLAIMED', 'ALREADY_CLAIMED'].includes(claim.status), 'CLAIM_FAILED');

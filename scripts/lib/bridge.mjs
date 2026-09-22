@@ -15,8 +15,10 @@ export function sourceAllowed(name,content,config,env=process.env){
   // Exact inspected test bytes, never a directory-wide exemption. Credentials
   // with recognizable formats and current secret environment values stay blocked.
   if(secretEnvironmentValues(env).some(v=>content.includes(v))||/\b(?:ghp_|github_pat_|sk-|xox[baprs]-)[A-Za-z0-9_-]{8,}|\b[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\b|Bearer\s+\S+|(?:authorization|set-cookie|cookie)\s*[:=]|https?:\/\/[^\s:@/]+:[^\s@/]+@|-----BEGIN [^-]*PRIVATE KEY-----/i.test(content))return false;
-  if(redactText(content,env)===content)return true;
-  return !!(testSource(name)&&config.synthetic_source_approvals?.some(a=>a.path===name&&a.sha256===sourceHash(content)&&a.kind==='synthetic-test-data'));
+  if(/\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)\b\s*[:=]\s*["'`][^"'`\r\n]{4,}["'`]/i.test(content)){
+    return !!(testSource(name)&&config.synthetic_source_approvals?.some(a=>a.path===name&&a.sha256===sourceHash(content)&&a.kind==='synthetic-test-data'));
+  }
+  return true;
 }
 export async function atomicJson(file,value) {
   const tmp=file+'.'+randomUUID()+'.tmp';
