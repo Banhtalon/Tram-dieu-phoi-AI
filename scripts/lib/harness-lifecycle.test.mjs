@@ -43,7 +43,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
   const productRunnerPath = path.join(root, 'product-runner.mjs');
   if (productCheck) {
     await writeFile(productModePath, String(productCheck));
-    await writeFile(productRunnerPath, `import{readFileSync}from'node:fs';const mode=readFileSync(process.argv[2],'utf8').trim();if(mode==='timeout')setTimeout(()=>{},60000);else if(mode==='malformed')console.log('not-json');else console.log(JSON.stringify(mode==='fail'?{status:'FAIL'}:mode==='invalid'?{status:'UNKNOWN'}:mode==='incomplete'?{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[],action_results:[]}:{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[{criterion_id:'criterion-001',status:'PASS',observed_result:'visible',evidence:'fixture'}],action_results:[{action_id:'action-001',status:'PASS',observed_result:'worked',evidence:'fixture'}]}));`);
+    await writeFile(productRunnerPath, `import{readFileSync}from'node:fs';const mode=readFileSync(process.argv[2],'utf8').trim();if(mode==='timeout')setTimeout(()=>{},60000);else if(mode==='malformed')console.log('not-json');else{console.log(JSON.stringify(['fail','fail-exit'].includes(mode)?{status:'FAIL'}:mode==='invalid'?{status:'UNKNOWN'}:mode==='incomplete'?{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[],action_results:[]}:{schema_version:'qq.workflow.product-check-result.v1',status:'PASS',target_url:'http://localhost:4173',criterion_results:[{criterion_id:'criterion-001',status:'PASS',observed_result:'visible',evidence:'fixture'}],action_results:[{action_id:'action-001',status:'PASS',observed_result:'worked',evidence:'fixture'}]}));if(mode==='fail-exit')process.exitCode=1;}`);
   }
   git(root, 'init');
   git(root, 'config', 'user.email', 'harness-test@example.invalid');
@@ -266,14 +266,28 @@ test('checkpoint rejects missing or replaced Product Check evidence file', async
   }
 });
 
+test('checkpoint rejects a modified review packet', async t => {
+  const f = await fixture({ productCheck: 'pass', bindConfig: true });
+  t.after(f.cleanup);
+  await runHarnessLifecycle(f.options);
+  const packetPath = path.join(f.workspace, '.workflow-local', f.id, 'review-packet.json');
+  const packet = JSON.parse(await readFile(packetPath, 'utf8'));
+  packet.acceptance_criteria.push('tampered after review');
+  packet.review_source.files[0].content += '\ntampered';
+  await writeFile(packetPath, JSON.stringify(packet, null, 2) + '\n');
+  await assert.rejects(() => approveCheckpoint({ ...f.options, approvedBy: 'fixture-owner' }), error => error.code === 'REVIEW_STALE');
+});
+
 test('missing Product Check command waits, functional failure blocks, and stale source cannot be verified', async t => {
   const missing = await fixture({ productCheck: 'missing', bindConfig: true });
   t.after(missing.cleanup);
   assert.equal((await runHarnessLifecycle(missing.options)).status, LIFECYCLE_STATES.PRODUCT_CHECK_WAIT);
 
-  const failed = await fixture({ productCheck: 'fail', bindConfig: true });
-  t.after(failed.cleanup);
-  assert.equal((await runHarnessLifecycle(failed.options)).status, LIFECYCLE_STATES.BLOCKED);
+  for (const mode of ['fail', 'fail-exit']) {
+    const failed = await fixture({ productCheck: mode, bindConfig: true });
+    t.after(failed.cleanup);
+    assert.equal((await runHarnessLifecycle(failed.options)).status, LIFECYCLE_STATES.BLOCKED, mode);
+  }
 
   const stale = await fixture({ productCheck: 'malformed', bindConfig: true });
   t.after(stale.cleanup);

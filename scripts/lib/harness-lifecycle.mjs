@@ -898,6 +898,7 @@ function initialState(task, paths, claim, worktree, control, config) {
     review_result: null,
     review_id: null,
     review_source_sha256: null,
+    review_input_sha256: null,
     requested_changes: [],
     request_history: [],
     checkpoint: { required: config.lifecycle.checkpoint_required, approved: false, approved_by: null, approved_at: null, checkpoint_id: null, review_id: null, changeset_signature: null },
@@ -1205,7 +1206,7 @@ function requestFor(review, state, instruction) {
 
 async function buildReviewPacket({ task, state, changeset, reviewId, config }) {
   const reviewSource = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
-  return {
+  const packet = {
     schema_version: REVIEW_PACKET_SCHEMA,
     task_id: task.task_id,
     contract_sha: task.contract_sha256,
@@ -1229,6 +1230,25 @@ async function buildReviewPacket({ task, state, changeset, reviewId, config }) {
     review_source: reviewSource,
     review_source_sha256: reviewSource.sha256
   };
+  packet.review_input_sha256 = reviewInputHash(packet);
+  return packet;
+}
+
+function reviewInputHash(packet) {
+  const input = structuredClone(packet);
+  input.review_result = null;
+  delete input.review_input_sha256;
+  return hash(input);
+}
+
+function validReviewPacket(packet, state) {
+  if (!packet || packet.schema_version !== REVIEW_PACKET_SCHEMA || packet.task_id !== state.task_id || packet.review_id !== state.review_id ||
+      packet.changeset_signature !== state.changeset_signature || packet.review_source_sha256 !== state.review_source_sha256 ||
+      packet.review_input_sha256 !== state.review_input_sha256 || packet.review_input_sha256 !== reviewInputHash(packet)) return false;
+  const source = structuredClone(packet.review_source ?? {});
+  const sourceHash = source.sha256;
+  delete source.sha256;
+  return sourceHash === packet.review_source_sha256 && hash(source) === sourceHash;
 }
 
 function requiresProductCheck(task) {
@@ -1261,8 +1281,8 @@ async function performProductCheck({ task, state, config, paths, claim, signal }
     await atomicJson(paths.productCheckPath, record); state.product_check = record;
     return { outcome: 'RECOVERY', record };
   }
-  if (result.code !== 0 || result.timed_out) {
-    const record = { ...base, status: 'UNVERIFIED', error: result.timed_out ? 'Product Check timed out' : 'Product Check runner was unavailable or failed' };
+  if (result.timed_out) {
+    const record = { ...base, status: 'UNVERIFIED', error: 'Product Check timed out' };
     await atomicJson(paths.productCheckPath, record); state.product_check = record;
     return { outcome: 'WAIT', record };
   }
@@ -1277,6 +1297,11 @@ async function performProductCheck({ task, state, config, paths, claim, signal }
     const record = { ...base, status: 'FAIL', result: parsed, error: 'Product Check reported a functional failure' };
     await atomicJson(paths.productCheckPath, record); state.product_check = record;
     return { outcome: 'BLOCKED', record };
+  }
+  if (result.code !== 0) {
+    const record = { ...base, status: 'UNVERIFIED', result: parsed, error: 'Product Check runner was unavailable or failed' };
+    await atomicJson(paths.productCheckPath, record); state.product_check = record;
+    return { outcome: 'WAIT', record };
   }
   try {
     const validated = validateProductCheckResult(parsed, resolveProductCheckContract(task.product_checks ?? task.product_check));
@@ -1295,6 +1320,10 @@ async function verificationFresh(task, state, config, paths) {
   if (changeset.signature !== state.changeset_signature) throw fail('REVIEW_STALE', 'workspace changed after review', { task_id: task.task_id });
   const source = await buildReviewSource(state.workspace, task, config, { ...changeset, tests: state.tests });
   if (source.sha256 !== state.review_source_sha256) throw fail('REVIEW_STALE', 'declared review source changed after review', { task_id: task.task_id });
+  const reviewPacket = await optionalJson(paths.reviewPacketPath);
+  if (!validReviewPacket(reviewPacket, state) || hash(reviewPacket.review_result) !== hash(state.review_result)) {
+    throw fail('REVIEW_STALE', 'review packet changed after review', { task_id: task.task_id });
+  }
   if (requiresProductCheck(task)) {
     const pc = state.product_check;
     const evidence = await optionalJson(paths.productCheckPath);
@@ -1333,7 +1362,7 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
   const claim = await claimFromDisk(paths.taskPath);
   await validateLease(paths.taskPath, { owner, token: claim.lease_token, version: state.lease?.version });
   const packet = await optionalJson(paths.reviewPacketPath);
-  if (!packet || packet.schema_version !== REVIEW_PACKET_SCHEMA || packet.task_id !== task.task_id || packet.review_id !== state.review_id) {
+  if (!validReviewPacket(packet, state)) {
     const error = fail('STATE_CORRUPTION', 'pending review packet is missing or does not match lifecycle state', { task_id: task.task_id });
     await saveState(state, paths, { phase: LIFECYCLE_STATES.RECOVERY_REQUIRED, status: LIFECYCLE_STATES.RECOVERY_REQUIRED, recovery: { required: true, reason: 'review packet is not recoverable' }, error }, claim);
     return resultOf(state);
@@ -1358,6 +1387,7 @@ async function reviewPendingAttempt({ task, paths, state, config, owner, reviewe
   packet.review_result = review;
   await writeFencedJson(paths, paths.reviewPacketPath, packet, claim, state.state_revision);
   state.review_result = review;
+  state.review_input_sha256 = packet.review_input_sha256;
   state.pending_review = false;
   state.requested_changes = review.verdict === 'REQUEST_CHANGES' ? [requestFor(review, state, review.material_findings.join('\n') || review.summary)] : [];
   if (review.verdict === 'REQUEST_CHANGES') {
@@ -1530,6 +1560,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
     state.review_id = reviewId;
     const pendingPacket = await buildReviewPacket({ task, state, changeset, reviewId, config });
     state.review_source_sha256 = pendingPacket.review_source_sha256;
+    state.review_input_sha256 = pendingPacket.review_input_sha256;
     await writeFencedJson(paths, paths.reviewPacketPath, pendingPacket, claim, state.state_revision);
     await saveState(state, paths, {
       phase: LIFECYCLE_STATES.PAUSED,
@@ -1546,6 +1577,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   state.review_id = reviewId;
   const packet = await buildReviewPacket({ task, state, changeset, reviewId, config });
   state.review_source_sha256 = packet.review_source_sha256;
+  state.review_input_sha256 = packet.review_input_sha256;
   await saveState(state, paths, { phase: LIFECYCLE_STATES.READY_FOR_REVIEW, status: LIFECYCLE_STATES.READY_FOR_REVIEW, review_id: reviewId, pending_review: true }, claim);
   const reviewProtectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
   const review = await independentReview({ task, packet, config, packetDir: paths.packetDir, cwd: state.workspace, state, signal, reviewerInvoker });
@@ -1990,6 +2022,7 @@ export async function reconcileTask(options = {}) {
   state.review_id = reviewId;
   const reviewPacket = await buildReviewPacket({ task, state, changeset, reviewId, config });
   state.review_source_sha256 = reviewPacket.review_source_sha256;
+  state.review_input_sha256 = reviewPacket.review_input_sha256;
   await writeFencedJson(paths, paths.reviewPacketPath, reviewPacket, claim, state.state_revision);
   await saveState(state, paths, { phase: state.phase, status: state.status, pending_review: state.phase === LIFECYCLE_STATES.READY_FOR_REVIEW, error: state.error ?? null }, claim);
   await operationEvent(paths.packetDir, 'execution_reconciled', transitionFields(state, { result: 'READY_FOR_REVIEW' }));

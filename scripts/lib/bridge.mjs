@@ -11,11 +11,11 @@ const relativePath=p=>typeof p==='string'&&p&&!path.isAbsolute(p)&&!p.includes('
 const sourceHash=content=>createHash('sha256').update(content).digest('hex');
 const testSource=p=>/(^|\/)(test|tests)\//.test(p)||/(^|\/)(tests|test_[^/]+)\.py$/.test(p)||/\.(test|spec)\.[cm]?[jt]sx?$/.test(p);
 export function sourceAllowed(name,content,config,env=process.env){
-  if(/[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]/.test(content))return false;
+  if(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufffd]/.test(content))return false;
   // Exact inspected test bytes, never a directory-wide exemption. Credentials
   // with recognizable formats and current secret environment values stay blocked.
   if(secretEnvironmentValues(env).some(v=>content.includes(v))||/\b(?:ghp_|github_pat_|sk-|xox[baprs]-)[A-Za-z0-9_-]{8,}|\b[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\b|Bearer\s+\S+|(?:authorization|set-cookie|cookie)\s*[:=]|https?:\/\/[^\s:@/]+:[^\s@/]+@|-----BEGIN [^-]*PRIVATE KEY-----/i.test(content))return false;
-  if(/\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)\b\s*[:=]\s*(?:["'`][^"'`\r\n]{4,}["'`]|\[(?:redacted|masked|hidden|secret)[^\]\r\n]*\])/i.test(content)){
+  if(/["']?\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key)\b["']?\s*[:=]\s*(?:["'`][^"'`\r\n]{4,}["'`]|\[(?:redacted|masked|hidden|secret)[^\]\r\n]*\]|(?=[^\r\n]{0,64}\d)[A-Za-z0-9_+/=-]{8,})/i.test(content)){
     return !!(testSource(name)&&config.synthetic_source_approvals?.some(a=>a.path===name&&a.sha256===sourceHash(content)&&a.kind==='synthetic-test-data'));
   }
   return true;
