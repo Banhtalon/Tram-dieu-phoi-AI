@@ -22,8 +22,8 @@
 - [x] B. Thống nhất luồng Gemini → kiểm thử → Luna; ASSISTED trước dispatch có lý do, không lách lỗi/ngân sách.
 - [x] C. Chuẩn hóa HANDOFF và mẫu bàn giao implementer/reviewer, dùng hồ sơ hiện có.
 - [x] D. Báo cáo phân biệt nghiệm thu, hoàn tất trong vùng riêng và đã gộp; không áp dụng khác chưa xác minh.
-- [ ] E. Chạy kiểm tra cuối và review độc lập đúng commit.
-- [ ] F. Owner nghiệm thu ba ví dụ báo cáo.
+- [x] E. Chạy kiểm tra cuối và review độc lập đúng commit: 68/68 PASS; reviewer PASS trên `041c177`.
+- [x] F. Owner nghiệm thu ba ví dụ báo cáo ngày 2026-09-23.
 - [ ] G. Gộp bản đã duyệt khi Owner cho phép; ghi commit nhánh đích.
 
 ## Trạng thái bàn giao mới nhất
@@ -51,7 +51,7 @@
 | B–D | Mã đã kiểm tra và review PASS | `7277fe2` | 68/68 PASS | PASS trên `041c177` | Owner nghiệm thu |
 | E | Hoàn tất kiểm tra/review | `7277fe2` | 68/68 PASS, diff-check sạch | PASS | F |
 | F | Owner nghiệm thu | `041c177` | Ba ví dụ giả đã tạo; Owner xác nhận đạt | Reviewer PASS | G |
-| G | Chờ quyền gộp | `041c177` | Chưa kiểm tra nhánh đích sau nghiệm thu | Reviewer PASS | Xin quyền gộp riêng |
+| G | Chờ quyền gộp | `041c177` | `main` tại `b300523` là tổ tiên của nhánh này; kiểm tra lại ngay trước gộp | Reviewer PASS | Xin quyền gộp riêng |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
