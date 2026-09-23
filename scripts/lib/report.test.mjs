@@ -102,6 +102,7 @@ test('Owner Product Check is bound to the frozen product URL and all evidence re
   const packet = path.join(root, 'packet'); await mkdir(packet);
   const taskPath = path.join(root, 'task.json');
   const task = JSON.parse(await readFile(new URL('../../.ai-workflow/templates/task.json', import.meta.url), 'utf8'));
+  delete task.execution.product_evidence_storage; // Historical task: all old records must agree.
   Object.assign(task, { base_sha: 'a'.repeat(40), candidate_head: 'b'.repeat(40), user_visible: true,
     product_check: { target_url: 'http://localhost:3000', criteria: ['home'], actions: ['open'] } });
   const frozen = await freezeControlledTask(taskPath, task);
@@ -142,4 +143,33 @@ test('Owner Product Check is bound to the frozen product URL and all evidence re
   assert.match(missingTask.owner_summary.product_check, /Chưa xác minh/);
   assert.ok(missingTask.blockers.length > 0);
   assert.doesNotMatch(missingTask.next_step, /gộp/);
+});
+
+test('new Owner report trusts only the single official product record', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'owner-single-product-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const packet = path.join(root, 'packet'); await mkdir(packet);
+  const taskPath = path.join(root, 'task.json');
+  const task = JSON.parse(await readFile(new URL('../../.ai-workflow/templates/task.json', import.meta.url), 'utf8'));
+  Object.assign(task, {base_sha: 'a'.repeat(40), candidate_head: 'b'.repeat(40), product_check: {target_url: 'http://localhost:3000', criteria: ['home'], actions: ['open']}});
+  const frozen = await freezeControlledTask(taskPath, task);
+  const identity = {task_id: task.task_id, revision: 1, head: task.candidate_head, contract_sha256: frozen.contract_sha256};
+  const write = (name, value) => writeFile(path.join(packet, name), JSON.stringify(value));
+  await write('state.json', {...identity, status: 'DONE', mode: 'ASSISTED', task_path: taskPath});
+  await write('evidence.json', {...identity, status: 'PASS', gates: [{id: 'fixture', code: 0}]});
+  await write('review.json', {...identity, verdict: 'PASS', independent: true, material_findings: []});
+  const product = {...identity, status: 'PASS', criteria_passed: true, target_url: 'http://localhost:3000', checks: [{action: 'open', observed: 'opened', passed: true}]};
+  await write('product_check.json', product);
+  assert.match((await buildReport(packet)).owner_summary.product_check, /đã đạt/);
+  await write('product_check.json', {...product, target_url: 'http://localhost:4000'});
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await write('product_check.json', product);
+  await write('ui_evidence.json', product);
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await rm(path.join(packet, 'ui_evidence.json'));
+  await writeFile(taskPath, JSON.stringify({...JSON.parse(await readFile(taskPath, 'utf8')), ui_evidence: product}));
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await writeFile(taskPath, JSON.stringify({...JSON.parse(await readFile(taskPath, 'utf8')), ui_evidence: undefined}));
+  await rm(path.join(packet, 'product_check.json'));
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
 });

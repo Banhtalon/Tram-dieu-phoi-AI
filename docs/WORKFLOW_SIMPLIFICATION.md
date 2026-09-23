@@ -2,6 +2,52 @@
 
 Đây là kế hoạch và sổ tiến độ, không bổ sung quy tắc. Nguồn quy tắc duy nhất: [canonical spec](../.ai-workflow/V10_CANONICAL_SPEC.md).
 
+## Đợt tinh gọn kết quả kiểm tra sản phẩm (đang làm)
+
+Mốc bắt đầu: nhánh `codex/workflow-simplification`, commit `8078f362aea3322b06b681f4fec0b9d8dbcaad82`; `main` tại `b3005236636ff9f6d92f378f754e3bf5fe86e44a` là tổ tiên. Git sạch trước sửa. Đợt cũ đã được Owner nghiệm thu cách báo cáo, nhưng chưa gộp. Đợt này có phạm vi mới; bằng chứng và review đợt cũ không chứng nhận mã mới.
+
+AI chỉ đánh dấu `[x]` sau khi xác minh, kèm commit và bằng chứng ở mục kết quả bên dưới. Nếu sửa mã sau review thì mở lại các mục kiểm tra/review bị ảnh hưởng. Mục chờ Owner và quyền gộp chỉ được đánh dấu theo lời xác nhận của Owner.
+
+### A. Bảo toàn và khảo sát
+- [x] Kiểm tra nhánh, Git sạch, mốc bắt đầu và quan hệ với `main` (lệnh Git ngày 2026-09-23).
+- [x] Tạo hồ sơ yêu cầu và ngân sách riêng tại `.workflow-local/workflow-single-product/`; giữ nguyên hồ sơ đợt cũ.
+- [x] Kiểm kê tất cả nơi ghi/đọc `product_check.json`, `ui_evidence.json` và `task.ui_evidence` (`controlled-bridge.mjs`, `report.mjs`).
+- [x] Đối chiếu Direct với controlled, báo cáo, tiếp tục tác vụ và xác nhận hoàn tất; Direct giữ file `product-check.json` và đối chiếu checkpoint như cũ (`harness-lifecycle.mjs`).
+
+### B. Một nguồn kết quả cho tác vụ mới
+- [x] Tạo kiểm thử thất bại trước khi sửa hành vi (`product-evidence.test.mjs`, `report.test.mjs`; RED rồi GREEN).
+- [x] Mẫu tác vụ mới khai báo `execution.product_evidence_storage: "single_file_v1"`; giá trị khác bị từ chối và trường này được khóa cùng yêu cầu.
+- [x] Tác vụ mới qua controlled bridge chỉ ghi `product_check.json`; không ghi bản sao vào `ui_evidence.json` hoặc task. Direct giữ cách ghi riêng đã có.
+- [x] Báo cáo, kiểm tra sẵn sàng, tiếp tục, xác nhận hoàn tất và xác nhận chạy thử đọc đúng nguồn chính thức (cùng hàm đọc `product-evidence.mjs`).
+- [x] Thiếu/hỏng/sai task, revision, commit, hợp đồng, URL hoặc có hồ sơ phụ thì không báo đạt (kiểm thử dữ liệu giả và kiểm tra mã).
+- [x] Tác vụ cũ không có dấu nhận biết tiếp tục được đọc và kiểm tra mâu thuẫn như hiện nay (kiểm thử `report.test.mjs`).
+- [x] `verify-product` không gọi lại worker/reviewer hay đặt lại ngân sách (kiểm thử Direct hiện có).
+
+### C. Hướng dẫn ngắn hơn
+- [x] Quy tắc chính mô tả nguồn kết quả mới và cách đọc hồ sơ cũ.
+- [x] HANDOFF, hướng dẫn Owner và tài liệu phụ dẫn về quy tắc; liên kết đã đối chiếu.
+- [x] Giữ nguyên model, ngân sách, giới hạn Direct và yêu cầu bảo vệ dữ liệu (không sửa các phần đó).
+
+### D. Kiểm tra độc lập
+- [x] Kiểm thử tác vụ mới và hồ sơ cũ đạt; dùng dữ liệu giả, không gọi AI thật (98/98 tại `final-gates.log`).
+- [x] Các kiểm thử review đúng commit, che bí mật và chưa gộp vẫn đạt (cùng bộ 98/98).
+- [ ] Chạy bộ kiểm thử cuối đã chốt và `git diff --check`; ghi commit mã và kết quả (98/98 đạt, chờ commit và diff-check cuối).
+- [ ] Reviewer độc lập PASS trên đúng commit cuối; sửa mã sau đó phải review lại.
+
+### E. Nghiệm thu và gộp
+- [x] Tạo ba ví dụ Owner từ mã mới tại `.workflow-local/workflow-single-product/OWNER_EXAMPLES.md` (dữ liệu giả).
+- [x] Ghi rõ trong ba ví dụ: dữ liệu giả, không có biên nhận Gemini/Luna qua bridge, model và usage chưa xác định.
+- [ ] Owner nghiệm thu đợt tinh gọn này; ghi đúng phạm vi được nghiệm thu.
+- [ ] Kiểm tra lại `main`, xung đột và bản mã định gộp.
+- [ ] Owner cho phép gộp riêng; sau đó gộp và ghi commit đích đã xác minh.
+
+Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, người xử lý tiếp** tại đây. Khôi phục bằng cách đảo riêng commit đợt mới; không reset/xóa hồ sơ cũ.
+
+### Kết quả đợt mới
+- Hồ sơ đợt mới: `.workflow-local/workflow-single-product/contract.json`, SHA-256 `ca8392cff75d29dec930fb1cdbff6abebd7c288ca1d78004b9baf3c04dae0602`. Tạo trước mọi lần gọi AI; đợt này chưa gọi Direct.
+- Kiểm thử RED/GREEN: thiếu module đọc kết quả và báo cáo chấp nhận hồ sơ phụ trước sửa; sau sửa 7/7 kiểm thử liên quan đạt. Bằng chứng cuối và review sẽ ghi sau commit.
+- Bộ kiểm thử cuối: 98/98 PASS (`.workflow-local/workflow-single-product/final-gates.log`). Chưa chạy Gemini/Luna thật qua Direct; đây là dữ liệu giả và kiểm thử cục bộ.
+
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.

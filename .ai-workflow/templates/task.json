@@ -22,7 +22,8 @@
   "risk": "LOW",
   "complexity": "SIMPLE",
   "execution": {
-    "policy": "CONTROLLED_DELEGATION_V1"
+    "policy": "CONTROLLED_DELEGATION_V1",
+    "product_evidence_storage": "single_file_v1"
   },
   "write_paths": [
     "src/example.mjs"

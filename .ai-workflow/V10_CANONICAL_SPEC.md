@@ -273,6 +273,15 @@ ui_evidence containing matching head/contract hash, a localhost URL, PASS status
 and nonempty checks with action, observed result and passed=true. Missing evidence
 is WAITING_CAPABILITY, not a repair request or Owner acceptance. Lead verifies the
 running build and records actual browser observations; JSON alone is not proof.
+New v10.1 tasks may freeze `execution.product_evidence_storage=single_file_v1`.
+For the controlled bridge, Product Check evidence is stored only in packet
+`product_check.json`; reports, readiness, resume and pilot verification read that
+file. Missing, unreadable, mismatched or additional legacy Product Check records
+remain unverified. Tasks without this frozen marker keep their existing evidence
+format and conflict checks. Direct already uses its own `product-check.json` and
+verifies it against the saved checkpoint; this marker does not change that route.
+The marker does not change Product Check criteria, model bindings, review, repair
+budgets or Owner acceptance.
 Owner sees the local link, short steps and status in Lead chat, never a requirement
 to inspect code/SQL/logs. UI changes invalidate old UI evidence with the head.
 Usage records retain provider-reported counters or null when unavailable; API price

@@ -2,8 +2,8 @@
 
 Điểm bắt đầu cho AI tiếp quản; nguồn quy tắc là [canonical spec](.ai-workflow/V10_CANONICAL_SPEC.md).
 
-1. Đọc canonical spec, sau đó [checklist](docs/WORKFLOW_SIMPLIFICATION.md).
-2. Mở `.workflow-local/workflow-simplification/contract.json` và `contract.sha256`, rồi bằng chứng và review được checklist dẫn tới. Hồ sơ local không nằm trong Git; thiếu hồ sơ thì báo thiếu bằng chứng, không suy đoán hoặc chạy lại.
+1. Đọc canonical spec, sau đó [checklist đợt hiện tại](docs/WORKFLOW_SIMPLIFICATION.md#đợt-tinh-gọn-kết-quả-kiểm-tra-sản-phẩm-đang-làm).
+2. Mở `.workflow-local/workflow-single-product/contract.json` và `contract.sha256`, rồi bằng chứng và review được checklist dẫn tới. Hồ sơ đợt trước ở `.workflow-local/workflow-simplification/`; không dùng review cũ cho mã mới. Hồ sơ local không nằm trong Git; thiếu hồ sơ thì báo thiếu bằng chứng, không suy đoán hoặc chạy lại.
 3. Kiểm tra `git status --short`, `git branch --show-current`, `git rev-parse HEAD`; đối chiếu với commit nền và commit review trong checklist.
 4. Tiếp tục đúng phần còn mở. Lead đối soát thao tác chưa rõ kết quả trước mọi dispatch.
 

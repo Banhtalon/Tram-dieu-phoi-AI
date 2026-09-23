@@ -2,6 +2,7 @@ import path from 'node:path';
 import {lstat,readFile,realpath,readdir} from 'node:fs/promises';
 import {redactText} from './redact.mjs';
 import {verifyReceiptChain} from './receipts.mjs';
+import {readSingleFileProductEvidence} from './product-evidence.mjs';
 
 const MAX_SOURCE_BYTES=2*1024*1024;
 const DEFAULT_MAX_BYTES=8192;
@@ -242,13 +243,15 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const identity={task_id:state.task_id??task?.task_id,revision:state.revision??task?.revision,head:state.head??task?.candidate_head,contract_sha256:state.contract_sha256??task?.contract_sha256};
   const rawEvidence=await regularJson(path.join(packetDir,'evidence.json')),evidence=strictlyBound(rawEvidence,identity)&&typeof rawEvidence.status==='string'&&Array.isArray(rawEvidence.gates)?rawEvidence:null;
   const rawReview=await regularJson(path.join(packetDir,'review.json')),review=strictlyBound(rawReview,identity)&&typeof rawReview.verdict==='string'&&Array.isArray(rawReview.material_findings)?rawReview:null;
-  const productFiles=await Promise.all(['product_check.json','ui_evidence.json'].map(async name=>{
+  const singleProduct=task?.execution?.product_evidence_storage==='single_file_v1'&&task.user_visible===true;
+  const singleProductFile=singleProduct?readSingleFileProductEvidence(packetDir,task):null;
+  const productFiles=singleProduct?[]:await Promise.all(['product_check.json','ui_evidence.json'].map(async name=>{
     const file=path.join(packetDir,name);
     try{await lstat(file);}catch(error){return {value:null,invalid:!['ENOENT','ENOTDIR'].includes(error.code)};}
     try{const value=await regularJson(file);return {value,invalid:value===null};}
     catch{return {value:null,invalid:true};}
   }));
-  const productCandidates=[...productFiles.map(file=>file.value),task?.ui_evidence];
+  const productCandidates=singleProduct?[singleProductFile.value]:[...productFiles.map(file=>file.value),task?.ui_evidence];
   const productUrlFields=['target_url','local_url','url','surface'];
   const singleProductUrl=value=>{
     if(!value||typeof value!=='object')return null;
@@ -259,7 +262,7 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const validProduct=value=>frozenTaskValid&&strictlyBound(value,identity)&&value.status==='PASS'&&value.criteria_passed===true&&Array.isArray(value.checks)&&value.checks.length>0&&
     value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim())&&
     !!frozenProductUrl&&singleProductUrl(value)===frozenProductUrl;
-  const productEvidenceInvalid=productFiles.some(file=>file.invalid)||productCandidates.some(value=>value!=null&&!validProduct(value));
+  const productEvidenceInvalid=!!singleProductFile?.invalid||(singleProduct&&(task.ui_evidence!=null||task.product_check_evidence!=null))||productFiles.some(file=>file.invalid)||productCandidates.some(value=>value!=null&&!validProduct(value));
   const product=productEvidenceInvalid?null:productCandidates.find(validProduct)??null;
   const reviewValid=!!review&&review.verdict==='PASS'&&review.independent===true&&review.material_findings.length===0;
   let productNotApplicable=false;
@@ -312,7 +315,7 @@ export async function buildReport(packetDir,{audience='owner'}={}){
     Object.assign(base,{task:{id:task?.task_id??state.task_id??null,revision:task?.revision??state.revision??null,head:state.head??task?.candidate_head??null,contract_sha256:state.contract_sha256??task?.contract_sha256??null},
       checkpoint:{phase:state.phase??null,last_confirmed:lastConfirmed,reconciliation_required:!!state.reconciliation_required||identityConflict||!!state.budget?.pending_reconcile,in_flight:!!state.in_flight},
       evidence:{observed:!!evidence,status:evidence?.status??'unavailable'},gates:gateSummary(evidence),review:{observed:!!review,verdict:review?.verdict??'unavailable',findings:(review?.material_findings??[]).map(x=>scalar(x)),independent:review?.independent??null},budget,
-      evidence_refs:[...(evidence?['evidence.json']:[]),...(review?['review.json']:[]),...(product?[(product===task?.ui_evidence?'task.json#ui_evidence':productCandidates[0]===product?'product_check.json':'ui_evidence.json')]:[])],
+      evidence_refs:[...(evidence?['evidence.json']:[]),...(review?['review.json']:[]),...(product?[(singleProduct||productCandidates[0]===product?'product_check.json':product===task?.ui_evidence?'task.json#ui_evidence':'ui_evidence.json')]:[])],
       invocations:aggregateInvocations(receiptData.items,receiptData.observed)});
   }
   return clean(base);

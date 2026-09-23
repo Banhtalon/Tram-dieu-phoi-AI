@@ -7,6 +7,7 @@ import { git, cleanHead, readJson, writeJson } from './workflow.mjs';
 import { invoke, doctor, validateBinding, validateReviewerBinding } from './bridge-adapters.mjs';
 import { acquire, atomicJson, sourceAllowed, applyPreflight } from './bridge.mjs';
 import { runRedacted, looksLikeSecretArgument, redactText } from './redact.mjs';
+import {readSingleFileProductEvidence} from './product-evidence.mjs';
 import { verifyReceiptChain, normalizeUsage } from './receipts.mjs';
 import {
   advanceBudget,
@@ -808,6 +809,9 @@ export function validateControlledTask(t) {
   if (!CONTROLLED_POLICIES.includes(policy)) {
     throw Error(`unsupported task policy: expected ${CONTROLLED_POLICIES.join(' or ')}, got ${policy}`);
   }
+  if (t.execution?.product_evidence_storage !== undefined && t.execution.product_evidence_storage !== 'single_file_v1') {
+    throw Error('unsupported product_evidence_storage');
+  }
   if (typeof t.task_id !== 'string' || !/^TASK-[A-Z0-9_-]+$/i.test(t.task_id)) {
     throw Error(`invalid task_id: ${t.task_id}`);
   }
@@ -1451,9 +1455,11 @@ export async function runControlledBridge({
         }))
       };
       await atomicJson(path.join(packetDir, 'product_check.json'), pcRecord);
-      await atomicJson(path.join(packetDir, 'ui_evidence.json'), pcRecord);
-      task.ui_evidence = pcRecord;
-      await writeJson(taskPath, task);
+      if (task.execution?.product_evidence_storage !== 'single_file_v1') {
+        await atomicJson(path.join(packetDir, 'ui_evidence.json'), pcRecord);
+        task.ui_evidence = pcRecord;
+        await writeJson(taskPath, task);
+      }
 
       const readiness = controlledReadiness(task, finalizedReceipt, evidence, reviewOrWaiver, config, { packetDir });
       if (readiness.status !== 'READY_FOR_OWNER') return readiness;
@@ -2553,7 +2559,12 @@ export function controlledReadiness(task, receipt, evidence, review, config, opt
 
   // Product check verification for user_visible tasks
   if (task.user_visible === true) {
-    const pcEvidence = task.ui_evidence ?? task.product_check_evidence;
+    const singleProduct = task.execution?.product_evidence_storage === 'single_file_v1';
+    const singleFile = singleProduct && options.packetDir ? readSingleFileProductEvidence(options.packetDir,task) : null;
+    if (singleProduct && (!singleFile || singleFile.invalid || task.ui_evidence != null || task.product_check_evidence != null)) {
+      return wait('single-file product evidence is missing, invalid or has a legacy copy');
+    }
+    const pcEvidence = singleProduct ? singleFile.value : task.ui_evidence ?? task.product_check_evidence;
     if (!pcEvidence || typeof pcEvidence !== 'object') {
       return wait('user_visible task requires passed ui_evidence');
     }
@@ -2811,7 +2822,12 @@ export async function validateControlledAcceptedPilot(config, pilotDir, { requir
 
   // Product Check
   let productCheck = null;
-  if (existsSync(path.join(pilotDir, 'product_check.json'))) {
+  const singleProduct = t.execution?.product_evidence_storage === 'single_file_v1' && t.user_visible === true;
+  if (singleProduct) {
+    const current = readSingleFileProductEvidence(pilotDir,t);
+    if (current.invalid || t.ui_evidence != null || t.product_check_evidence != null) throw Error('single-file product evidence is missing, invalid or has a legacy copy');
+    productCheck = current.value;
+  } else if (existsSync(path.join(pilotDir, 'product_check.json'))) {
     productCheck = await readJson(path.join(pilotDir, 'product_check.json'));
   } else if (existsSync(path.join(pilotDir, 'ui_evidence.json'))) {
     productCheck = await readJson(path.join(pilotDir, 'ui_evidence.json'));
@@ -2847,7 +2863,7 @@ export async function validateControlledAcceptedPilot(config, pilotDir, { requir
 
   // Recompute controlledReadiness
   const taskForReadiness = { ...t };
-  if (productCheck && !taskForReadiness.ui_evidence) {
+  if (productCheck && !singleProduct && !taskForReadiness.ui_evidence) {
     taskForReadiness.ui_evidence = productCheck;
   }
   const ready = controlledReadiness(taskForReadiness, receipt, evidence, review, config, {
