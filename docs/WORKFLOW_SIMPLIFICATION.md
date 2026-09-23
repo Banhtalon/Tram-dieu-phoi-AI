@@ -5,8 +5,8 @@
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: E — BLOCKED_TECHNICAL. Review bổ sung NEEDS_FIX; ngân sách bổ sung đã dùng hết.
-- Người/AI xử lý tiếp: chờ Owner cho phép thêm một lượt sửa và một review cho hai lỗi vừa được xác nhận.
+- Phần đang làm: E — đã sửa hai lỗi bằng lượt bổ sung thứ hai được Owner cho phép; chờ review độc lập.
+- Người/AI xử lý tiếp: reviewer độc lập kiểm tra đúng bản mới; Lead đối soát verdict.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -29,17 +29,19 @@
 ## Trạng thái bàn giao mới nhất
 - Commit mã sửa bổ sung: `377967b01877d6fd2c7799815aaad68102e0606a`; file `product_check.json` hoặc `ui_evidence.json` hỏng giờ được báo “Chưa xác minh”. Test hồi quy tái hiện lỗi trước sửa, sau sửa đạt.
 - Kiểm tra bản bàn giao `b2fe3e508b9f78e04af197bab1639137a85ade8b`: 67/67 PASS tại `final-gates-b2fe3e5.log`; `git diff --check` đạt. Ba ví dụ Owner đã tạo lại bằng dữ liệu giả trên bản này.
-- Review độc lập tại `b2fe3e5`: `NEEDS_FIX`. Hai lỗi mới: review có `head` sai nhưng `candidate_head` đúng vẫn được báo đạt; chuỗi biên nhận rỗng vẫn được báo như đã có biên nhận. Cần kiểm thử hồi quy và sửa trước nghiệm thu.
+- Review độc lập tại `b2fe3e5`: `NEEDS_FIX`. Hai lỗi mới: review có `head` sai nhưng `candidate_head` đúng vẫn được báo đạt; chuỗi biên nhận rỗng vẫn được báo như đã có biên nhận.
+- Commit mã sửa hai lỗi này: `d1b70c2236b32a70b412e3d3cb89a463dd898f8e`. Cả hai kiểm thử hồi quy đã thất bại trước sửa, đạt sau sửa; bộ 67/67 đạt tại `second-recovery-gates.log`. Chưa có review cho commit này.
 - Ngân sách gốc: 2/2 lượt sửa đã dùng; 2 review NEEDS_FIX, 2 lần gọi Luna lỗi giới hạn trước verdict. Ngân sách bổ sung Owner cho phép cũng đã dùng 1/1 lượt sửa và 1/1 review; ghi riêng tại `.workflow-local/workflow-simplification/supplemental-budget.json`, không đặt lại ngân sách gốc.
+- Owner cho phép lượt phục hồi thứ hai đúng một sửa và một review; sổ riêng: `.workflow-local/workflow-simplification/second-supplemental-budget.json`. Lượt sửa đã dùng, review còn chờ.
 - Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phương án và phạm vi sửa tại `SUPPLEMENTAL_REPAIR_PROPOSAL.md`.
-- Tiếp theo: chỉ khi Owner cho phép ngân sách phục hồi mới, Lead sửa hai lỗi báo cáo rồi review lại đúng bản mới. Chưa nghiệm thu, chưa gộp.
+- Tiếp theo: review độc lập đúng mã mới; chỉ khi PASS mới trình Owner nghiệm thu. Chưa nghiệm thu, chưa gộp.
 
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
 |---|---|---|---|---|---|
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
-| B–D | Mã đã kiểm tra, review NEEDS_FIX | `377967b` | 67/67 PASS | Review `b2fe3e5` tìm hai lỗi báo cáo mới | Chờ quyền sửa bổ sung |
-| E–G | Bị chặn tại E | `377967b` | E có gate PASS | Chưa PASS | Sửa có phép → review → F → G |
+| B–D | Mã đã kiểm tra, chờ review mới | `d1b70c2` | 67/67 PASS | Review cũ NEEDS_FIX; bản mới chưa review | Review bản mới |
+| E–G | Chờ review tại E | `d1b70c2` | E có gate PASS | Chưa PASS | Review → F → G |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
