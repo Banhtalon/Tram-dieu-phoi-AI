@@ -55,8 +55,8 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 ## Mốc đợt trước (lịch sử đã nghiệm thu cách báo cáo)
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: G — Owner đã nghiệm thu cách báo cáo qua ba ví dụ ngày 2026-09-23; chờ quyền gộp.
-- Người/AI xử lý tiếp: Lead xác nhận nhánh đích không xung đột khi Owner cho phép gộp.
+- Phần G đã hoàn tất: Owner nghiệm thu đợt tinh gọn và cho phép gộp ngày 2026-09-23; `main` đã nhận bản này.
+- Người/AI xử lý tiếp: không có việc còn mở trong đợt này.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -65,7 +65,7 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 ## Công việc trước kế hoạch này
 - [x] Review luồng và xác nhận hai lỗi.
 - [x] Sửa hai lỗi tại `6ed6a58`; 64/64 kiểm thử đạt; review độc lập PASS.
-- [ ] Xác minh bản sửa đã được gộp vào nhánh đích. Hiện chỉ xác nhận có trên nhánh triển khai.
+- [x] Xác minh bản sửa đã nằm trong `main`: `6ed6a58` là tổ tiên của commit đích `de2e31c`.
 
 ## Kế hoạch đơn giản hóa
 - [x] A. Tạo checklist và ghi điểm khôi phục; kiểm tra ban đầu không có file thay đổi.
@@ -74,9 +74,9 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 - [x] D. Báo cáo phân biệt nghiệm thu, hoàn tất trong vùng riêng và đã gộp; không áp dụng khác chưa xác minh.
 - [x] E. Chạy kiểm tra cuối và review độc lập đúng commit: 68/68 PASS; reviewer PASS trên `041c177`.
 - [x] F. Owner nghiệm thu ba ví dụ báo cáo ngày 2026-09-23.
-- [ ] G. Gộp bản đã duyệt khi Owner cho phép; ghi commit nhánh đích.
+- [x] G. Gộp bản đã duyệt sau khi Owner cho phép; `main` fast-forward đến `de2e31c`, rồi ghi nhận nghiệm thu trong commit tài liệu `4cc4e62`.
 
-## Trạng thái bàn giao mới nhất
+## Bằng chứng đợt trước
 - Commit mã sửa bổ sung: `377967b01877d6fd2c7799815aaad68102e0606a`; file `product_check.json` hoặc `ui_evidence.json` hỏng giờ được báo “Chưa xác minh”. Test hồi quy tái hiện lỗi trước sửa, sau sửa đạt.
 - Kiểm tra bản bàn giao `b2fe3e508b9f78e04af197bab1639137a85ade8b`: 67/67 PASS tại `final-gates-b2fe3e5.log`; `git diff --check` đạt. Ba ví dụ Owner đã tạo lại bằng dữ liệu giả trên bản này.
 - Review độc lập tại `b2fe3e5`: `NEEDS_FIX`. Hai lỗi mới: review có `head` sai nhưng `candidate_head` đúng vẫn được báo đạt; chuỗi biên nhận rỗng vẫn được báo như đã có biên nhận.
@@ -92,7 +92,7 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 - Owner cho phép lượt phục hồi thứ tư đúng một sửa và một review; cả hai đã dùng, review PASS, sổ riêng: `.workflow-local/workflow-simplification/fourth-supplemental-budget.json`.
 - Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phạm vi lượt sửa hiện tại tại `FOURTH_RECOVERY_PROPOSAL.md`.
 - Nghiệm thu Owner: “Tôi nghiệm thu cách báo cáo qua cả ba ví dụ” (2026-09-23). Đây là nghiệm thu nội dung báo cáo; chưa phải quyền gộp.
-- Tiếp theo: G — chờ Owner cho phép gộp; hiện chưa gộp.
+- Sau mốc trên, Owner đã cho phép gộp; phần G hoàn tất cùng đợt mới tại `de2e31c`.
 
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
@@ -101,7 +101,7 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 | B–D | Hoàn tất | `7277fe2` | 68/68 PASS | PASS trên `041c177` | E đã đạt |
 | E | Hoàn tất kiểm tra/review | `7277fe2` | 68/68 PASS, diff-check sạch | PASS | F đã nghiệm thu |
 | F | Owner nghiệm thu | `041c177` | Ba ví dụ giả đã tạo; Owner xác nhận đạt | Reviewer PASS | G, chờ quyền gộp |
-| G | Chờ quyền gộp | `041c177` | `main` tại `b300523` là tổ tiên của nhánh này; kiểm tra lại ngay trước gộp | Reviewer PASS | Xin quyền gộp riêng |
+| G | Đã gộp | `de2e31c` | `main` fast-forward, Git sạch; 99/99 mã và 57/57 PowerShell đạt trước gộp | Reviewer PASS trên mã `3b002ea` của đợt mới | Không còn việc trong đợt này |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
