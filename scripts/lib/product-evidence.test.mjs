@@ -4,7 +4,7 @@ import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {readSingleFileProductEvidence} from './product-evidence.mjs';
-import {validateControlledTask, freezeControlledTask, assertControlledContract} from './controlled-bridge.mjs';
+import {validateControlledTask, freezeControlledTask, assertControlledContract, bridgeSourceHash} from './controlled-bridge.mjs';
 
 test('one official product record, no legacy copy', async t => {
   const packet = await mkdtemp(path.join(os.tmpdir(), 'single-product-'));
@@ -24,10 +24,15 @@ test('single-file record must belong to the frozen task and current commit', asy
   const write = value => writeFile(path.join(packet, 'product_check.json'), JSON.stringify(value));
   await write(record);
   assert.equal(readSingleFileProductEvidence(packet, task).invalid, false);
-  for (const altered of [{...record, task_id: 'TASK-OTHER'}, {...record, revision: 2}, {...record, head: 'c'.repeat(40)}, {...record, contract_sha256: 'd'.repeat(64)}]) {
+  for (const altered of [{...record, task_id: 'TASK-OTHER'}, {...record, revision: 2}, {...record, head: 'c'.repeat(40)}, {...record, candidate_head: 'c'.repeat(40)}, {...record, contract_sha256: 'd'.repeat(64)}]) {
     await write(altered);
     assert.equal(readSingleFileProductEvidence(packet, task).invalid, true);
   }
+});
+
+test('bridge source hash covers the product evidence reader', async () => {
+  const current = await bridgeSourceHash();
+  assert.notEqual(await bridgeSourceHash({'product-evidence.mjs': 'tampered'}), current);
 });
 
 test('new task template freezes the single-file choice and rejects other values', async () => {

@@ -331,6 +331,7 @@ export const CONTROLLED_BRIDGE_DEPENDENCIES = Object.freeze([
   'workflow.mjs',
   'bridge-adapters.mjs',
   'bridge-process.mjs',
+  'product-evidence.mjs',
   'redact.mjs',
   'receipts.mjs'
 ]);

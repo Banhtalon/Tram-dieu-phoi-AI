@@ -16,6 +16,7 @@ export function readSingleFileProductEvidence(packetDir, task) {
   const legacy = read('ui_evidence.json');
   const value = official.value ?? null;
   const identityMismatch = task && (value?.task_id !== task.task_id || value?.revision !== task.revision ||
-    value?.head !== task.candidate_head || value?.contract_sha256 !== task.contract_sha256);
+    value?.head !== task.candidate_head || (value?.candidate_head !== undefined && value.candidate_head !== task.candidate_head) ||
+    value?.contract_sha256 !== task.contract_sha256);
   return {value, invalid: !!official.invalid || !!official.missing || !legacy.missing || !!identityMismatch};
 }
