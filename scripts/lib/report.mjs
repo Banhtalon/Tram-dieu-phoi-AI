@@ -229,6 +229,11 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const state=await regularJson(path.join(packetDir,'state.json'));
   if(!state)throw Error('readable state.json required in packet directory');
   const taskPath=taskPathFor(state,packetDir),task=taskPath?await regularJson(taskPath,{root:path.dirname(packetDir)}):null;
+  let frozenTaskValid=!!task&&task.schema_version!=='qq.workflow.task.v10.1';
+  if(task?.schema_version==='qq.workflow.task.v10.1'&&taskPath){
+    try{const {assertControlledContract}=await import('./controlled-bridge.mjs');await assertControlledContract(taskPath,task);frozenTaskValid=true;}
+    catch{frozenTaskValid=false;}
+  }
   const identityConflict=!!task&&(
     (state.task_id!==undefined&&state.task_id!==task.task_id)||
     (state.revision!==undefined&&state.revision!==task.revision)||
@@ -244,25 +249,29 @@ export async function buildReport(packetDir,{audience='owner'}={}){
     catch{return {value:null,invalid:true};}
   }));
   const productCandidates=[...productFiles.map(file=>file.value),task?.ui_evidence];
-  const validProduct=value=>strictlyBound(value,identity)&&value.status==='PASS'&&value.criteria_passed===true&&Array.isArray(value.checks)&&value.checks.length>0&&
-    value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim());
+  const productUrlFields=['target_url','local_url','url','surface'];
+  const singleProductUrl=value=>{
+    if(!value||typeof value!=='object')return null;
+    const urls=productUrlFields.filter(key=>Object.hasOwn(value,key)).map(key=>value[key]);
+    return urls.length&&urls.every(url=>typeof url==='string'&&url.trim())&&new Set(urls.map(url=>url.trim())).size===1?urls[0].trim():null;
+  };
+  const frozenProductUrl=singleProductUrl(task?.product_checks??task?.product_check);
+  const validProduct=value=>frozenTaskValid&&strictlyBound(value,identity)&&value.status==='PASS'&&value.criteria_passed===true&&Array.isArray(value.checks)&&value.checks.length>0&&
+    value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim())&&
+    !!frozenProductUrl&&singleProductUrl(value)===frozenProductUrl;
   const productEvidenceInvalid=productFiles.some(file=>file.invalid)||productCandidates.some(value=>value!=null&&!validProduct(value));
   const product=productEvidenceInvalid?null:productCandidates.find(validProduct)??null;
   const reviewValid=!!review&&review.verdict==='PASS'&&review.independent===true&&review.material_findings.length===0;
   let productNotApplicable=false;
-  if(!identityConflict&&strictlyBound(task,identity)&&task.schema_version==='qq.workflow.task.v10.1'&&task.user_visible===false&&
+  if(frozenTaskValid&&!identityConflict&&strictlyBound(task,identity)&&task.schema_version==='qq.workflow.task.v10.1'&&task.user_visible===false&&
       (task.product_checks??task.product_check)?.applicable===false&&
       !productEvidenceInvalid){
-    try{
-      // Legacy v10 does not freeze product_check, so it cannot prove non-applicability.
-      const {assertControlledContract}=await import('./controlled-bridge.mjs');
-      await assertControlledContract(taskPath,task);
-      productNotApplicable=true;
-    }catch{ /* Unreadable or changed frozen contract remains unverified. */ }
+    productNotApplicable=true;
   }
+  const productEvidenceUnverified=productEvidenceInvalid||(!product&&!productNotApplicable);
   const receiptData=await receiptInvocations(packetDir,state,identity);
   const preliminaryBlockers=blockersFor(state,evidence,review,audience);
-  if(productEvidenceInvalid)preliminaryBlockers.push(audience==='owner'?'Chưa xác minh bằng chứng kiểm tra sản phẩm; Lead cần đối soát hồ sơ.':'Product evidence is unreadable or does not match; Lead reconciliation is required.');
+  if(productEvidenceUnverified)preliminaryBlockers.push(audience==='owner'?'Chưa xác minh bằng chứng kiểm tra sản phẩm; Lead cần đối soát hồ sơ.':'Product evidence is unreadable, missing or does not match; Lead reconciliation is required.');
   if(identityConflict)preliminaryBlockers.push(audience==='owner'?'Lead cần đối soát định danh task và checkpoint.':'Task and checkpoint identity conflict; Lead reconciliation is required.');
   if(['READY_FOR_OWNER','DONE'].includes(state.status)&&!evidence)preliminaryBlockers.push(audience==='owner'?'Chưa có bằng chứng kiểm tra hợp lệ cho bản hiện tại.':'Current bound gate evidence is unavailable.');
   if(['READY_FOR_OWNER','DONE'].includes(state.status)&&!review)preliminaryBlockers.push(audience==='owner'?'Chưa có review hợp lệ cho bản hiện tại.':'Current bound review is unavailable.');

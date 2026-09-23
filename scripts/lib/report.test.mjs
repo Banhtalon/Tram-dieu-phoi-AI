@@ -95,3 +95,51 @@ test('Owner report distinguishes frozen non-applicability, review validity and m
   const large = { ...report, blockers: Array(100).fill('x'.repeat(1000)) };
   assert.ok(Buffer.byteLength(formatReport(large)) <= 8192);
 });
+
+test('Owner Product Check is bound to the frozen product URL and all evidence records', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'owner-product-url-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const packet = path.join(root, 'packet'); await mkdir(packet);
+  const taskPath = path.join(root, 'task.json');
+  const task = JSON.parse(await readFile(new URL('../../.ai-workflow/templates/task.json', import.meta.url), 'utf8'));
+  Object.assign(task, { base_sha: 'a'.repeat(40), candidate_head: 'b'.repeat(40), user_visible: true,
+    product_check: { target_url: 'http://localhost:3000', criteria: ['home'], actions: ['open'] } });
+  const frozen = await freezeControlledTask(taskPath, task);
+  const identity = { task_id: task.task_id, revision: task.revision, head: task.candidate_head, contract_sha256: frozen.contract_sha256 };
+  const write = (name, value) => writeFile(path.join(packet, name), JSON.stringify(value));
+  await write('state.json', { ...identity, status: 'DONE', mode: 'ASSISTED', task_path: taskPath });
+  await write('evidence.json', { ...identity, status: 'PASS', gates: [{ id: 'fixture', code: 0 }] });
+  await write('review.json', { ...identity, verdict: 'PASS', independent: true, material_findings: [] });
+  const product = target_url => ({ ...identity, schema_version: 'qq.workflow.ui-evidence.v10', status: 'PASS', criteria_passed: true,
+    result_schema_version: 'qq.workflow.product-check-result.v1', target_url,
+    criterion_results: [{ criterion_id: 'criterion-001', status: 'PASS', observed_result: 'visible', evidence: 'synthetic' }],
+    action_results: [{ action_id: 'action-001', status: 'PASS', observed_result: 'opened', evidence: 'synthetic' }],
+    checks: [{ action: 'open', observed: 'opened', passed: true }] });
+  await write('product_check.json', product('http://localhost:4000'));
+  await write('ui_evidence.json', product('http://localhost:3000'));
+  const mismatch = await buildReport(packet);
+  assert.match(mismatch.owner_summary.product_check, /Chưa xác minh/);
+  assert.ok(mismatch.blockers.length > 0);
+  assert.doesNotMatch(mismatch.next_step, /gộp/);
+  await write('product_check.json', product('http://localhost:3000'));
+  const matching = await buildReport(packet);
+  assert.match(matching.owner_summary.product_check, /đã đạt/);
+  assert.equal(matching.blockers.length, 0);
+  const frozenTask = await readFile(taskPath, 'utf8');
+  const changedTask = JSON.parse(frozenTask);
+  changedTask.product_check.target_url = 'http://localhost:4000';
+  await writeFile(taskPath, JSON.stringify(changedTask));
+  await write('product_check.json', product('http://localhost:4000'));
+  await write('ui_evidence.json', product('http://localhost:4000'));
+  const changedContract = await buildReport(packet);
+  assert.match(changedContract.owner_summary.product_check, /Chưa xác minh/);
+  assert.ok(changedContract.blockers.length > 0);
+  await writeFile(taskPath, frozenTask);
+  await write('product_check.json', product('http://localhost:3000'));
+  await write('ui_evidence.json', product('http://localhost:3000'));
+  await rm(taskPath);
+  const missingTask = await buildReport(packet);
+  assert.match(missingTask.owner_summary.product_check, /Chưa xác minh/);
+  assert.ok(missingTask.blockers.length > 0);
+  assert.doesNotMatch(missingTask.next_step, /gộp/);
+});
