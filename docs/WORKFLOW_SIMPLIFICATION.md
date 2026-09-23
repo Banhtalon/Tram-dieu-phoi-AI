@@ -48,9 +48,9 @@
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
 |---|---|---|---|---|---|
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
-| B–D | Mã đã kiểm tra và review PASS | `7277fe2` | 68/68 PASS | PASS trên `041c177` | Owner nghiệm thu |
-| E | Hoàn tất kiểm tra/review | `7277fe2` | 68/68 PASS, diff-check sạch | PASS | F |
-| F | Owner nghiệm thu | `041c177` | Ba ví dụ giả đã tạo; Owner xác nhận đạt | Reviewer PASS | G |
+| B–D | Hoàn tất | `7277fe2` | 68/68 PASS | PASS trên `041c177` | E đã đạt |
+| E | Hoàn tất kiểm tra/review | `7277fe2` | 68/68 PASS, diff-check sạch | PASS | F đã nghiệm thu |
+| F | Owner nghiệm thu | `041c177` | Ba ví dụ giả đã tạo; Owner xác nhận đạt | Reviewer PASS | G, chờ quyền gộp |
 | G | Chờ quyền gộp | `041c177` | `main` tại `b300523` là tổ tiên của nhánh này; kiểm tra lại ngay trước gộp | Reviewer PASS | Xin quyền gộp riêng |
 
 ## Kiểm tra và nghiệm thu dự kiến
