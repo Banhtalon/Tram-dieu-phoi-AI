@@ -44,8 +44,8 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - [x] E3. `python mcp/test_antigravity_server.py` đạt.
 - [x] E4. `git diff --check` đạt; liên kết tài liệu và lệnh mẫu đúng.
 - [x] E5. Direct giữ giới hạn 256 KiB, bảo vệ bí mật, ngân sách, review độc lập và bước nghiệm thu.
-- [ ] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
-- [ ] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
+- [x] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
+- [x] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
 - [ ] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
 - [ ] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
 
@@ -64,7 +64,9 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - E5: sau sửa theo review, còn nguyên `MAX_PACKET_TEXT = 256 * 1024` và ca thử 256 KiB + 1 còn nguyên; Direct vẫn kiểm tra reviewer Luna Max, giới hạn `max_rework = 2`, khóa task/config, lọc bí mật và checkpoint Owner. `prepare` mới từ chối FAST/V2/LOCAL_AUTO; `check/status` của hồ sơ cũ không đổi.
 - Phạm vi: chỉ kho Trạm Điều Phối AI; dự án khác không thay đổi. Không gọi tài khoản thật, không xóa packet.
 - Quyết định đã chốt: giữ khả năng tiếp tục tác vụ cũ; bỏ LOCAL_AUTO khỏi luồng hiện tại. Direct vẫn là đường việc mới.
-- Review c211da1: NEEDS_FIX — `resume` thiếu state có thể khởi tạo mới, `recover` thiếu operator, HANDOFF ghim checklist tạm thời. Đã sửa trên nhánh, sẽ review lại đúng commit mới.
-- Commit mã đã review: chưa có.
+- Review c211da1: NEEDS_FIX — `resume` thiếu state có thể khởi tạo mới, `recover` thiếu operator, HANDOFF ghim checklist tạm thời. Đã sửa và review lại trên commit `4affed8` với kết quả PASS.
+- E6: reviewer độc lập PASS trên đúng commit mã `4affed84c6fdc01a551cf418c99fc2c09e4da901`, đối chiếu từ nền `fc5c5bc`; không còn phát hiện quan trọng. Lần đầu `c211da1` là NEEDS_FIX, đã sửa và review lại.
+- E7: đã báo Owner phần bỏ, phần giữ, kết quả và giới hạn chưa gọi AI thật trong cập nhật của đợt này.
+- Commit mã đã review: `4affed84c6fdc01a551cf418c99fc2c09e4da901`.
 - Commit đích sau gộp: chưa có.
-- Trở ngại/người xử lý tiếp: chưa có.
+- Trở ngại/người xử lý tiếp: chờ Owner nghiệm thu và cho phép gộp riêng (E8/E9). Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.
