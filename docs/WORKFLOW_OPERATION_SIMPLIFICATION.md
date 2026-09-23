@@ -44,7 +44,7 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - [x] E3. `python mcp/test_antigravity_server.py` đạt.
 - [x] E4. `git diff --check` đạt; liên kết tài liệu và lệnh mẫu đúng.
 - [x] E5. Direct giữ giới hạn 256 KiB, bảo vệ bí mật, ngân sách, review độc lập và bước nghiệm thu.
-- [ ] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
+- [x] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
 - [x] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
 - [ ] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
 - [ ] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
@@ -69,6 +69,8 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - E7: đã báo Owner phần bỏ, phần giữ, kết quả và giới hạn chưa gọi AI thật trong cập nhật của đợt này.
 - Hotfix theo yêu cầu Owner sau bài thử đăng nhập: trước khi đóng băng task mới, Lead đối chiếu gate với hành vi, trường hợp sai có thể xảy ra và câu chữ Owner thực sự yêu cầu; `repairs` đếm lượt Gemini sửa thực tế, `change_requests` đếm yêu cầu của Luna. Trường hợp 2 lượt Gemini và 2 yêu cầu sửa phải báo `repairs=1`, `change_requests=2`.
 - Hợp đồng phiên bản 3 thay phiên bản 2 cho hotfix này. Review PASS của commit `4affed8` chỉ áp dụng cho nguồn cũ; E6 mở lại cho commit mã mới. Bộ kiểm tra Node 105/105, PowerShell 57/57 và Python smoke exit 0 đã chạy sau hotfix; chưa gọi tài khoản AI thật.
-- Commit mã đã review: `4affed84c6fdc01a551cf418c99fc2c09e4da901`.
+- Reviewer độc lập đã chỉ ra trường hợp Gemini hoàn thành nhưng hậu kiểm BLOCKED chưa tăng `attempt`, và vị trí ghi checklist trước `prepare` chưa tồn tại. Đã sửa cả hai; test Direct thất bại trước khi sửa và đạt sau khi sửa cho trường hợp đếm lượt, rồi chạy lại Node 105/105, PowerShell 57/57, Python smoke exit 0; `git diff --check` sạch.
+- E6 hotfix: reviewer độc lập PASS trên đúng commit `3a24bd09641b28e1472b2a867f21c1763bf07449` so với `7f4892b`, chạy lại Direct 4/4 và kiểm tra diff sạch. Chưa gọi tài khoản AI thật. Review cũ trên `4affed8` giữ làm bằng chứng lịch sử.
+- Commit mã đã review: `3a24bd09641b28e1472b2a867f21c1763bf07449`.
 - Commit đích sau gộp: chưa có.
 - Trở ngại/người xử lý tiếp: chờ Owner nghiệm thu và cho phép gộp riêng (E8/E9). Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.
