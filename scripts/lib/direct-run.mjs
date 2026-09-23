@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, writeFile, realpath, readdir } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile, realpath, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lifecycle from './harness-lifecycle.mjs';
-import { freezeControlledTask, assertControlledContract, controlledConfigHash, validateControlledTask } from './controlled-bridge.mjs';
+import { freezeControlledTask, assertControlledContract, controlledConfigHash, validateControlledTask, resolveProductCheckContract, validateProductCheckResult } from './controlled-bridge.mjs';
 import { assertSubscriptionSettings, validateReviewerBinding } from './bridge-adapters.mjs';
 import { assertWorkerIsolation } from './implementation-worker.mjs';
 import { auditSummary } from './harness-observability.mjs';
+import { runRedacted } from './redact.mjs';
 
 const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
 const json = async file => JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
@@ -33,6 +34,42 @@ const requireDirectReviewer = config => {
   requireValue(!config.fallback_reviewer, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
 };
 
+const fixtureCommand = (repo, argv) => argv.map((arg, index) => index > 0 && !path.isAbsolute(arg) && /\.(?:[cm]?js|py|ps1|sh)$/i.test(arg) && existsSync(path.join(repo, arg)) ? path.join(repo, arg) : arg);
+const reportedStatus = stdout => { try { return JSON.parse(stdout.trim()).status; } catch { return null; } };
+
+async function qualifyPreparation(repo, task, config, { required = false } = {}) {
+  const probe = config.preflight;
+  if (!probe) { requireValue(!required, 'PREFLIGHT_REQUIRED'); return; }
+  requireValue(typeof probe.good_cwd === 'string' && path.isAbsolute(probe.good_cwd) &&
+    typeof probe.bad_cwd === 'string' && path.isAbsolute(probe.bad_cwd) &&
+    typeof probe.good_target_url === 'string' && probe.good_target_url.trim(), 'PREFLIGHT_INVALID');
+  const [good, bad] = await Promise.all([stat(probe.good_cwd).catch(() => null), stat(probe.bad_cwd).catch(() => null)]);
+  requireValue(good?.isDirectory() && bad?.isDirectory() &&
+    (await realpath(probe.good_cwd)).toLowerCase() !== (await realpath(probe.bad_cwd)).toLowerCase(), 'PREFLIGHT_FIXTURE_INVALID');
+  let wrongFixtureRejected = false;
+  for (const gate of task.gates) {
+    const argv = fixtureCommand(repo, gate.argv);
+    const positive = await runRedacted(argv, { cwd: probe.good_cwd, timeoutSeconds: gate.timeout_seconds });
+    const positiveStatus = reportedStatus(positive.stdout);
+    requireValue(positive.code === 0 && !positive.timed_out && !positive.interrupted &&
+      (positiveStatus === null || positiveStatus === 'PASS'), 'PREFLIGHT_GOOD_GATE_FAILED');
+    const negative = await runRedacted(argv, { cwd: probe.bad_cwd, timeoutSeconds: gate.timeout_seconds });
+    requireValue(!negative.timed_out && !negative.interrupted, 'PREFLIGHT_BAD_GATE_INVALID');
+    wrongFixtureRejected ||= negative.code !== 0 && reportedStatus(negative.stdout) !== 'PASS';
+  }
+  requireValue(wrongFixtureRejected, 'PREFLIGHT_BAD_GATE_PASSED');
+  const command = config.product_check?.command;
+  requireValue(Array.isArray(command) && command.length > 0, 'PREFLIGHT_PRODUCT_REQUIRED');
+  const result = await runRedacted(fixtureCommand(repo, command), { cwd: probe.good_cwd, timeoutSeconds: config.timeout_seconds ?? 300 });
+  requireValue(result.code === 0 && !result.timed_out, 'PREFLIGHT_PRODUCT_FAILED');
+  let parsed;
+  try { parsed = JSON.parse(result.stdout.trim()); } catch { requireValue(false, 'PREFLIGHT_PRODUCT_INVALID'); }
+  try {
+    const contract = resolveProductCheckContract(task.product_checks ?? task.product_check);
+    validateProductCheckResult(parsed, { ...contract, targetUrl: probe.good_target_url });
+  } catch { requireValue(false, 'PREFLIGHT_PRODUCT_INVALID'); }
+}
+
 // One host/account writer at a time, as required by the temporary-permissions helper.
 export async function prepareDirect(repo, task, config, output) {
   repo = path.resolve(repo); output = path.resolve(output);
@@ -51,6 +88,7 @@ export async function prepareDirect(repo, task, config, output) {
   assertWorkerIsolation(config, { repoRoot: repo, controlRoot: output });
   const root = path.join(repo, '.workflow-local', 'direct', task.task_id);
   requireValue(!existsSync(root) && !existsSync(output), 'OUTPUT_EXISTS');
+  await qualifyPreparation(repo, task, config, { required: task.user_visible === true });
   const taskPath = path.join(root, `${task.task_id}.json`);
   const packetDir = path.join(output, task.task_id);
   const helper = path.join(root, 'antigravity_server.py');
@@ -99,6 +137,7 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
   }
   requireValue(digest(await readFile(config.worker.command[1])) === m.helper_sha256, 'HELPER_CHANGED');
   requireValue(m.helper_sha256 === digest(await readFile(path.join(sourceRoot, 'mcp', 'antigravity_server.py'))), 'HELPER_SOURCE_MISMATCH');
+  if (config.preflight) await qualifyPreparation(m.repo, task, config);
   const settings = await json(config.worker.temporary_permissions.settingsPath);
   assertSubscriptionSettings(settings);
   requireValue(Array.isArray(settings.permissions?.allow), 'INVALID_PERMISSIONS');

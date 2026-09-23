@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect, statusDirect, acceptDirect } from './direct-run.mjs';
 import * as lifecycle from './harness-lifecycle.mjs';
 import { freezeControlledTask } from './controlled-bridge.mjs';
@@ -177,4 +179,53 @@ test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Lun
   await testCheckDirectRejection({ ...validConfig.reviewer, model: 'gpt-5.6-terra' }, undefined, 'LUNA_REVIEWER_REQUIRED');
   await testCheckDirectRejection({ ...validConfig.reviewer, effort: 'high' }, undefined, 'LUNA_REVIEWER_REQUIRED');
   await testCheckDirectRejection(undefined, { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-terra', effort: 'high' }, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
+});
+
+test('visible Direct preparation proves good/bad gate behavior and Product Check shape before freezing', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'direct-preflight-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repo = path.join(root, 'repo'), good = path.join(root, 'good'), bad = path.join(root, 'bad'), output = path.join(root, 'output');
+  await Promise.all([mkdir(repo), mkdir(good), mkdir(bad)]);
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init'); git('config', 'user.name', 'Direct test'); git('config', 'user.email', 'test@example.invalid');
+  await writeFile(path.join(repo, '.gitignore'), '.workflow-local/\n');
+  await writeFile(path.join(repo, 'check.mjs'), `import {readFileSync, existsSync} from 'node:fs';
+import {pathToFileURL} from 'node:url'; import path from 'node:path';
+const ok=readFileSync('page.html','utf8').trim()==='good';
+const item=(id,kind)=>({[kind+'_id']:id,status:'PASS',observed_result:'observed',...(existsSync('omit-evidence')?{}:{evidence:'local fixture'})});
+process.stdout.write(JSON.stringify({schema_version:'qq.workflow.product-check-result.v1',status:ok?'PASS':'FAIL',target_url:pathToFileURL(path.resolve('page.html')).href,criterion_results:[item('page','criterion')],action_results:[item('open','action')]}));
+if(!ok)process.exitCode=1;`);
+  git('add', '.'); git('commit', '-m', 'fixture');
+  await writeFile(path.join(good, 'page.html'), 'good\n');
+  await writeFile(path.join(bad, 'page.html'), 'bad\n');
+  const task = { schema_version: 'qq.workflow.task.v10.1', task_id: 'TASK-PREFLIGHT-TEST', revision: 1, base_sha: git('rev-parse', 'HEAD'), goal: 'new page',
+    acceptance_criteria: ['open the page'], gates: [{ id: 'page', argv: [process.execPath, 'check.mjs'], timeout_seconds: 10 },
+      { id: 'noop', argv: [process.execPath, '-e', 'process.exit(0)'], timeout_seconds: 10 }],
+    user_visible: true, risk: 'LOW', complexity: 'SIMPLE', execution: { policy: 'CONTROLLED_DELEGATION_V1' },
+    write_paths: ['page.html'], allowed_paths: ['page.html'], lane: 'NORMAL', initial_lane: 'NORMAL', initial_risk: 'LOW',
+    product_check: { target_url: pathToFileURL(path.join(root, 'worktrees', 'TASK-PREFLIGHT-TEST', 'page.html')).href,
+      criteria: [{ id: 'page', text: 'page' }], actions: [{ id: 'open', text: 'open' }] }, candidate_head: null };
+  const config = { schema_version: 'qq.bridge.v2', billing: 'SUBSCRIPTION_ONLY', mode: 'ASSISTED', timeout_seconds: 20,
+    write_paths: task.write_paths, gate_paths: ['check.mjs'],
+    worker: { transport: 'mcp', server: 'antigravity_worker', provider: 'mcp', command: ['python', 'placeholder'], model: 'gemini-3.8-flash-high', local_trial: true, local_trial_root: path.join(root, 'worktrees'), skip_permissions: false },
+    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-luna', effort: 'max' },
+    product_check: { command: [process.execPath, 'check.mjs'] },
+    preflight: { good_cwd: good, bad_cwd: bad, good_target_url: pathToFileURL(path.join(good, 'page.html')).href } };
+  await assert.rejects(prepareDirect(repo, task, { ...config, preflight: undefined }, output), /PREFLIGHT_REQUIRED/);
+  assert.equal(existsSync(output), false);
+  await writeFile(path.join(good, 'omit-evidence'), '1');
+  await assert.rejects(prepareDirect(repo, task, config, output), /PREFLIGHT_PRODUCT_INVALID/);
+  assert.equal(existsSync(output), false);
+  await rm(path.join(good, 'omit-evidence'));
+  await writeFile(path.join(bad, 'page.html'), 'good\n');
+  await assert.rejects(prepareDirect(repo, task, config, output), /PREFLIGHT_BAD_GATE_PASSED/);
+  await writeFile(path.join(bad, 'page.html'), 'bad\n');
+  await writeFile(path.join(good, 'page.html'), 'bad\n');
+  await assert.rejects(prepareDirect(repo, task, config, output), /PREFLIGHT_GOOD_GATE_FAILED/);
+  await writeFile(path.join(good, 'page.html'), 'good\n');
+  const prepared = await prepareDirect(repo, task, config, output);
+  assert.equal(prepared.repo, repo);
+  assert.equal(existsSync(path.join(output, 'prepared.json')), true);
+  await writeFile(path.join(good, 'omit-evidence'), '1');
+  await assert.rejects(checkDirect(path.join(output, 'prepared.json')), /PREFLIGHT_PRODUCT_INVALID/);
 });

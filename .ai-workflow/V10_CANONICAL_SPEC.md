@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.7 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.8 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -114,6 +114,16 @@ model name, and a provider name is not a role.
    Lead views the rendered result at relevant screen sizes before Owner handoff.
    Product copy must be supported by Owner intent or existing source; do not invent
    detailed gameplay or other product behavior to fill an introduction page.
+   For a new user-visible Direct task, Lead supplies a local acceptable fixture and
+   a plausible wrong fixture. Before freezing a packet, Direct `prepare` runs each
+   frozen gate on both: all gates must pass the acceptable fixture and at least
+   one must reject the wrong fixture.
+   It also runs the actual Product Check command on the acceptable fixture and
+   validates its complete result, including evidence for every frozen criterion
+   and action. `check` repeats this no-model probe before dispatch. A failed probe
+   creates no new packet or worker attempt. If representative fixtures cannot be
+   prepared, Lead records the reason and selects ASSISTED before any Direct dispatch.
+   Previously prepared tasks retain their frozen route and requirements.
 3. Use one writer. Lead works or hands off via shared files and available tools.
 4. Run relevant checks during development. No mandatory full suite for every tiny edit.
 5. At feature completion, commit code, inspect actual diff, run agreed final gates.

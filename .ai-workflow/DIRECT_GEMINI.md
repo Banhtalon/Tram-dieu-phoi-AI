@@ -7,7 +7,18 @@
 Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc và kích thước prompt. Nếu Direct đã biết không phù hợp, xem ngoại lệ ASSISTED tại [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow). Lead ghi lý do và thông báo; Owner không phải chọn cách chạy. Không dùng ngoại lệ để chạy lại Direct đã thất bại, vượt ngân sách hoặc chưa rõ kết quả.
 
 1. Dùng task `qq.workflow.task.v10.1` và config `qq.bridge.v2` hiện có; chốt repo chính, base SHA, mục tiêu, tiêu chí, exact `allowed_paths`/`write_paths` và gates. Owner chỉ cần mô tả công việc. Điều phối soạn JSON.
-2. Bắt đầu từ [mẫu cấu hình Direct](BRIDGE_CONFIG.direct.example.json). Thay `write_paths` bằng đúng các file được giao, `gate_paths` bằng file bảo vệ cho các lệnh kiểm tra, và `local_trial_root` bằng thư mục tuyệt đối bên ngoài repo và packet. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Direct preflight không còn yêu cầu hoặc đọc định nghĩa agent Gemini no-tools, kiểm tra thuê bao Antigravity và quyền ghi tạm thời của worker vẫn giữ nguyên. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
+2. Bắt đầu từ [mẫu cấu hình Direct](BRIDGE_CONFIG.direct.example.json). Thay `write_paths` bằng đúng các file được giao, `gate_paths` bằng file bảo vệ cho các lệnh kiểm tra, và `local_trial_root` bằng thư mục tuyệt đối bên ngoài repo và packet. Với việc giao diện mới, thêm `product_check.command` và `preflight` như đoạn dưới. Hai thư mục mẫu có nội dung tối thiểu: một kết quả đúng, một kết quả sai có thể xảy ra; script gate nằm trong repo và dùng đường dẫn tương đối trong lệnh. `good_target_url` phải đúng URL mà script Product Check trả về khi đứng tại thư mục mẫu đúng. `prepare` tự chạy phép kiểm tra trên cả hai mẫu và xác nhận đủ định dạng Product Check **trước khi tạo packet**, không gọi AI. `check` và `run` thử lại trước dispatch; nếu mẫu sai, sửa phần chuẩn bị rồi mới chạy. Task đã prepare từ trước không bị ép thêm bước này. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
+
+```json
+{
+  "product_check": { "command": ["node", "tests/browser-check.mjs"] },
+  "preflight": {
+    "good_cwd": "C:/project/.workflow-local/fixtures/good",
+    "bad_cwd": "C:/project/.workflow-local/fixtures/bad",
+    "good_target_url": "file:///C:/project/.workflow-local/fixtures/good/page.html"
+  }
+}
+```
 3. Chạy `prepare`; lệnh này không gọi model. `run` tự kiểm tra điều kiện trước khi gọi AI, vì vậy chỉ chạy `check` riêng khi cần chẩn đoán. `prepare` tạo task/lock và helper dưới `.workflow-local/direct/<task_id>`, packet bên ngoài repo, giữ nguyên trạng thái paused/stopped. Chỉ hỗ trợ repo chính, không dùng một worktree làm repo nguồn. Thêm `.workflow-local/` vào ignore của repo trước khi chuẩn bị.
 4. Chạy `run` đúng một lần cho lần bắt đầu mới. Tối đa hai lượt worker và hai lượt reviewer, chỉ một repair trong cùng tiến trình. Worker Gemini thực hiện (Gemini implement), controller tự chạy gate (controller tests), và OpenAI Codex Luna Max kiểm tra độc lập (Luna Max independent review). Worker chỉ dùng file tools trên file được giao.
 5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
@@ -16,6 +27,7 @@ Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc v
 Trước `prepare`, Lead chép các mục sau vào ghi chú/checklist chuẩn bị tác vụ ở ngoài đường dẫn output mà `prepare` sẽ tạo. Đánh dấu `[x]` sau khi ghi hành động, kết quả hoặc giới hạn kiểm tra bên cạnh mục tương ứng; kèm ghi chú này vào hồ sơ tác vụ sau `prepare`:
 
 - [ ] Hành động và kết quả quan sát được khớp yêu cầu Owner.
+- [ ] Với việc giao diện mới, mẫu đúng làm mọi gate PASS và Product Check trả đủ `evidence`; ít nhất một gate bắt mẫu sai. `prepare` xác nhận trước khi tạo packet, không tốn lượt AI.
 - [ ] Phép kiểm tra bắt được một kết quả sai có thể xảy ra; với biểu mẫu, thử đầu vào thiếu/sai khi phù hợp.
 - [ ] Không tự thêm điều kiện đúng từng chữ hoặc dấu câu mà Owner chưa yêu cầu.
 - [ ] Nếu không kiểm tra tự động được, ghi bước kiểm tra tay và giới hạn của nó.
