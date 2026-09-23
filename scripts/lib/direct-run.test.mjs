@@ -32,6 +32,11 @@ test('Direct status and completed accept explain ownership without claiming inte
   assert.equal(exhausted.attempts, 2);
   assert.equal(exhausted.repairs, 1);
   assert.equal(exhausted.change_requests, 2);
+  await writeFile(path.join(root, 'state.json'), JSON.stringify({ status: 'BLOCKED', task_id: task.task_id, attempt: 1, rework_count: 1,
+    latest_execution: { status: 'SUCCEEDED', agent_status: 'SUCCESS', exit_code: 0, attempt: 2 } }));
+  const blockedAfterWorker = await statusDirect(manifestPath);
+  assert.equal(blockedAfterWorker.attempts, 2);
+  assert.equal(blockedAfterWorker.repairs, 1);
 });
 
 test('one process, at most one repair, close on PASS/block/error and preserve instruction', async () => {

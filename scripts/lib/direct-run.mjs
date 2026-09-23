@@ -18,7 +18,13 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const git = (repo, ...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true }).trim();
 const writeNew = async (file, value) => writeFile(file, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const requireValue = (ok, code) => { if (!ok) throw Object.assign(Error(code), { code }); };
-const completedRepairs = state => Number.isInteger(state.attempt) ? Math.max(0, state.attempt - 1) : null;
+const completedAttempts = state => {
+  const recorded = Number.isInteger(state.attempt) ? state.attempt : null;
+  const latest = state.latest_execution;
+  const verified = latest?.status === 'SUCCEEDED' && latest.agent_status === 'SUCCESS' && latest.exit_code === 0 && Number.isInteger(latest.attempt) ? latest.attempt : null;
+  return recorded === null && verified === null ? null : Math.max(recorded ?? 0, verified ?? 0);
+};
+const completedRepairs = state => { const attempts = completedAttempts(state); return attempts === null ? null : Math.max(0, attempts - 1); };
 const inside = (root, file) => { const rel = path.relative(root, file); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 const errorCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code ?? '') ? error.code : 'DIRECT_RUN_FAILED';
 const requireDirectReviewer = config => {
@@ -143,7 +149,7 @@ export async function runDirect(manifestPath, signal) {
       try {
         if (existsSync(path.join(m.packetDir, 'state.json'))) {
           const saved = await json(path.join(m.packetDir, 'state.json'));
-          report.worker_attempts_completed = saved.attempt;
+          report.worker_attempts_completed = completedAttempts(saved);
           report.repairs = completedRepairs(saved);
           report.change_requests = saved.rework_count;
           report.review = saved.review_result?.verdict ?? null;
@@ -199,7 +205,7 @@ export async function statusDirect(manifestPath) {
     LEASE_EXPIRED: 'Quyền giữ tác vụ đã hết hạn; Lead đối soát trước khi tiếp tục.'
   }[state.status] ?? 'Chưa xác nhận hoàn tất; Lead kiểm tra hồ sơ và xử lý bước tiếp theo.';
   const reason = /^[A-Z][A-Z0-9_]{0,63}$/.test(state.error?.code ?? '') ? ` Mã nguyên nhân: ${state.error.code}.` : '';
-  return { status: state.status, owner_message: owner_message + reason, task_id: state.task_id, attempts: state.attempt,
+  return { status: state.status, owner_message: owner_message + reason, task_id: state.task_id, attempts: completedAttempts(state),
     repairs: completedRepairs(state), change_requests: state.rework_count ?? null,
     review: state.review_result?.verdict ?? null, product_check: state.product_check?.status ?? (state.product_check === null ? 'NOT_APPLICABLE' : null), approved: state.checkpoint?.approved === true };
 }

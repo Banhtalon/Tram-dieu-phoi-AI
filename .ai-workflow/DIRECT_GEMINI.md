@@ -13,7 +13,7 @@ Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc v
 5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
-Trước `prepare`, Lead chép các mục sau vào checklist của task và chỉ đánh dấu `[x]` khi đã ghi bằng chứng trong packet:
+Trước `prepare`, Lead chép các mục sau vào ghi chú/checklist chuẩn bị tác vụ ở ngoài đường dẫn output mà `prepare` sẽ tạo. Đánh dấu `[x]` sau khi ghi hành động, kết quả hoặc giới hạn kiểm tra bên cạnh mục tương ứng; kèm ghi chú này vào hồ sơ tác vụ sau `prepare`:
 
 - [ ] Hành động và kết quả quan sát được khớp yêu cầu Owner.
 - [ ] Phép kiểm tra bắt được một kết quả sai có thể xảy ra; với biểu mẫu, thử đầu vào thiếu/sai khi phù hợp.
