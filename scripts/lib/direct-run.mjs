@@ -137,7 +137,7 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
   }
   requireValue(digest(await readFile(config.worker.command[1])) === m.helper_sha256, 'HELPER_CHANGED');
   requireValue(m.helper_sha256 === digest(await readFile(path.join(sourceRoot, 'mcp', 'antigravity_server.py'))), 'HELPER_SOURCE_MISMATCH');
-  if (config.preflight) await qualifyPreparation(m.repo, task, config);
+  if (config.preflight && !allowExisting) await qualifyPreparation(m.repo, task, config);
   const settings = await json(config.worker.temporary_permissions.settingsPath);
   assertSubscriptionSettings(settings);
   requireValue(Array.isArray(settings.permissions?.allow), 'INVALID_PERMISSIONS');

@@ -228,4 +228,7 @@ if(!ok)process.exitCode=1;`);
   assert.equal(existsSync(path.join(output, 'prepared.json')), true);
   await writeFile(path.join(good, 'omit-evidence'), '1');
   await assert.rejects(checkDirect(path.join(output, 'prepared.json')), /PREFLIGHT_PRODUCT_INVALID/);
+  await checkDirect(path.join(output, 'prepared.json'), { allowExisting: true }).catch(error => {
+    assert.doesNotMatch(error.message, /PREFLIGHT_/);
+  });
 });
