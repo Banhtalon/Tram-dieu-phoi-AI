@@ -18,8 +18,8 @@ accepts. Existing frozen tasks retain their own version, policy and budgets; the
 V1 schema discriminator used by init is not a request for Owner to choose a lane.
 New tasks do not use Fast Lane, V2, GEMINI_FIRST or LOCAL_AUTO. The historical
 runtime is available only to inspect, reconcile or resume its frozen packets.
-HANDOFF.md is the current entry, linking this specification, the tracked progress
-checklist and the active local packet. Guides and checklists record execution,
+HANDOFF.md is the current entry, linking this specification and explaining how
+to find the active local packet and its own tracked progress checklist. Guides and checklists record execution,
 not additional workflow rules. Owner-facing stages are assigned, implementing,
 checking, awaiting acceptance, awaiting integration and integrated; blocked work
 includes a reason and next actor. Internal state codes remain unchanged.

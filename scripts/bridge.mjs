@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import {readJson} from './lib/workflow.mjs';
 import {inspect,runBridge} from './lib/bridge.mjs';
 import {redactText} from './lib/redact.mjs';
@@ -30,15 +31,21 @@ try {
     } else result=await inspect(path.resolve(cwd),loadedConfig,path.resolve(dir),flags.includes('--probe'),controller.signal);
   } else if(command==='resume') {
     const [config,task,cwd,dir]=args;
+    if (!dir || !existsSync(path.join(dir, 'state.json'))) {
+      throw Object.assign(Error('A frozen run packet with state.json is required before legacy resume.'), { code: 'LEGACY_RESUME_REQUIRES_PACKET' });
+    }
     packetDir=dir;
     result=await runBridge({config:await readJson(config),taskPath:task,cwd,packetDir,pilot:args.includes('--pilot'),resume:true,signal:controller.signal});
   } else if(['request-changes','continue','checkpoint','reject-checkpoint','complete','recover','reconcile'].includes(command)) {
     const [config,task,cwd,dir,...rest]=args;
+    if (command === 'recover' && (rest.length < 2 || !rest[0]?.trim() || !rest.slice(1).join(' ').trim())) {
+      throw Object.assign(Error('recover requires the recorded claim owner and a reason.'), { code: 'RECOVERY_ARGUMENTS_REQUIRED' });
+    }
     const lifecycle=await import('./lib/harness-lifecycle.mjs');
     const options={config:await readJson(config),taskPath:task,cwd,packetDir:dir};
     if(command==='request-changes'||command==='continue')options.instruction=rest.join(' ');
     if(command==='reject-checkpoint'){options.reason=rest.join(' ');options.rejectedBy=options.owner;}
-    if(command==='recover'){options.decision='block';options.reason=rest.join(' ');options.operator=options.owner;}
+    if(command==='recover'){options.decision='block';options.operator=rest[0];options.reason=rest.slice(1).join(' ');}
     result=command==='request-changes'?await lifecycle.requestChanges(options):command==='continue'?await lifecycle.continueHarnessLifecycle(options):command==='checkpoint'?await lifecycle.approveCheckpoint(options):command==='reject-checkpoint'?await lifecycle.rejectCheckpoint(options):command==='recover'?await lifecycle.recoverTask(options):command==='reconcile'?await lifecycle.reconcileTask(options):await lifecycle.completeTask(options);
   } else if(command==='inspect') {
     const [config,task,dir]=args;

@@ -56,14 +56,15 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - A2: `.workflow-local/workflow-operation-simplification/contract.json`, revision 2 và hash ở đầu trang. Phạm vi thêm `HANDOFF_FILES.md` cùng allowlist Fast Lane; bằng chứng revision 1 bị thay thế.
 - A5: `node --test scripts/lib/*.test.mjs` 99/99; PowerShell 57/57; Python smoke exit 0.
 - A3/A4: kho chính có hai Direct packet đang dở: `TASK-REVIEWER-LUNA-001` ở `RECOVERY_REQUIRED` (lỗi `WORKER_TIMEOUT`, 0 attempt/repair), `TASK-SOURCE-FILTER-001` ở `BLOCKED` (lỗi `RECOVERY_REQUIRED`, 0 attempt/repair). Hồ sơ cũ của đợt tinh gọn và ví dụ giả đã đóng; không thấy packet Fast Lane cần tiếp tục. Chỉ đọc hai packet bên ngoài repo, không sửa.
-- B: HANDOFF/BOOTSTRAP/Direct/ROUTING dẫn tới đường hiện tại; mẫu Direct được dùng trong kiểm thử `prepareDirect`, reviewer Luna Max, không fallback; `run` tự preflight.
+- B: HANDOFF/BOOTSTRAP dẫn tới packet của đúng task (không ghim checklist đợt này); Direct/ROUTING dẫn tới đường hiện tại; mẫu Direct được dùng trong kiểm thử `prepareDirect`, reviewer Luna Max, không fallback; `run` tự preflight.
 - C: Direct phụ thuộc `controlled-bridge`, `execution-policy`, `bridge`; các file này nằm trong dấu nguồn legacy. Tách ra sẽ tăng mã trùng hoặc đổi dấu nguồn của packet đã khóa. Giữ nguyên để phục hồi; kiểm thử hiện có chặn task/config bị sửa (`harness-lifecycle.test.mjs`, checkpoint/accept). Lệnh `direct status` đọc đúng hai trạng thái trên.
-- D: bỏ runner/phân loại/allowlist/hướng dẫn Fast Lane (382 dòng mã và dữ liệu); bridge CLI từ chối `pilot/run/quota-drill/activate` với `LEGACY_NEW_DISPATCH_DISABLED`, còn `resume`, `inspect`, `reconcile`, `recover`, `status`, `report`. Commit trước thay đổi giữ nguồn lịch sử. Không xóa packet hoặc worktree.
-- E1-E3: revision 2 đạt Node 103/103, PowerShell 57/57, Python smoke exit 0; chỉ dùng môi trường giả, không gọi tài khoản AI thật.
-- E4: revision 2 `git diff --check` exit 0; kiểm tra 25 liên kết Markdown nội bộ, 0 liên kết thiếu.
-- E5: revision 2 xác nhận `MAX_PACKET_TEXT = 256 * 1024` và ca thử 256 KiB + 1 còn nguyên; Direct vẫn kiểm tra reviewer Luna Max, giới hạn `max_rework = 2`, khóa task/config, lọc bí mật và checkpoint Owner. `prepare` mới từ chối FAST/V2/LOCAL_AUTO; `check/status` của hồ sơ cũ không đổi.
+- D: bỏ runner/phân loại/allowlist/hướng dẫn Fast Lane (382 dòng mã và dữ liệu); bridge CLI từ chối `pilot/run/quota-drill/activate` với `LEGACY_NEW_DISPATCH_DISABLED`, `resume` đòi packet có `state.json`; `recover` đòi chủ claim và lý do. Vẫn có `inspect`, `reconcile`, `status`, `report`. Commit trước thay đổi giữ nguồn lịch sử. Không xóa packet hoặc worktree.
+- E1-E3: sau sửa theo review, Node 105/105, PowerShell 57/57, Python smoke exit 0; chỉ môi trường giả, không gọi tài khoản AI thật.
+- E4: sau sửa theo review, `git diff --check` exit 0; 26 liên kết Markdown nội bộ, 0 thiếu.
+- E5: sau sửa theo review, còn nguyên `MAX_PACKET_TEXT = 256 * 1024` và ca thử 256 KiB + 1 còn nguyên; Direct vẫn kiểm tra reviewer Luna Max, giới hạn `max_rework = 2`, khóa task/config, lọc bí mật và checkpoint Owner. `prepare` mới từ chối FAST/V2/LOCAL_AUTO; `check/status` của hồ sơ cũ không đổi.
 - Phạm vi: chỉ kho Trạm Điều Phối AI; dự án khác không thay đổi. Không gọi tài khoản thật, không xóa packet.
 - Quyết định đã chốt: giữ khả năng tiếp tục tác vụ cũ; bỏ LOCAL_AUTO khỏi luồng hiện tại. Direct vẫn là đường việc mới.
+- Review c211da1: NEEDS_FIX — `resume` thiếu state có thể khởi tạo mới, `recover` thiếu operator, HANDOFF ghim checklist tạm thời. Đã sửa trên nhánh, sẽ review lại đúng commit mới.
 - Commit mã đã review: chưa có.
 - Commit đích sau gộp: chưa có.
 - Trở ngại/người xử lý tiếp: chưa có.

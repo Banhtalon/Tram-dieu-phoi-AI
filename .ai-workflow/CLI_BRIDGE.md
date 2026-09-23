@@ -16,8 +16,8 @@ node scripts/bridge.mjs status <run-packets>
 node scripts/bridge.mjs report <run-packets> --audience lead --format json
 node scripts/bridge.mjs inspect <bridge-config.json> <frozen-task.json> <run-packets>
 node scripts/bridge.mjs reconcile <bridge-config.json> <frozen-task.json> <repo> <run-packets>
-node scripts/bridge.mjs recover <bridge-config.json> <frozen-task.json> <repo> <run-packets> <reason>
+node scripts/bridge.mjs recover <bridge-config.json> <frozen-task.json> <repo> <run-packets> <claim-owner> <reason>
 node scripts/bridge.mjs resume <bridge-config.json> <frozen-task.json> <repo> <run-packets>
 ```
 
-`recover` ghi trạng thái chặn khi không thể xác nhận thao tác trước; không phải lệnh chạy tiếp. Với hồ sơ Direct, ưu tiên [lệnh Direct](DIRECT_GEMINI.md) và chỉ dùng các lệnh `inspect`, `reconcile`, `recover` của bridge khi trạng thái yêu cầu. Các mẫu `BRIDGE_CONFIG.controlled.example.json` và `BRIDGE_CONFIG.example.json` là bản lịch sử, không dùng cho việc mới.
+`recover` cần tên chủ quyền xử lý đúng như hồ sơ claim và lý do cụ thể; lệnh ghi trạng thái chặn khi không thể xác nhận thao tác trước; không phải lệnh chạy tiếp. Với hồ sơ Direct, ưu tiên [lệnh Direct](DIRECT_GEMINI.md) và chỉ dùng các lệnh `inspect`, `reconcile`, `recover` của bridge khi trạng thái yêu cầu. Các mẫu `BRIDGE_CONFIG.controlled.example.json` và `BRIDGE_CONFIG.example.json` là bản lịch sử, không dùng cho việc mới.
