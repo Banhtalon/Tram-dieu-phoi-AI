@@ -2,7 +2,7 @@
 
 Đây là kế hoạch và sổ tiến độ, không bổ sung quy tắc. Nguồn quy tắc duy nhất: [canonical spec](../.ai-workflow/V10_CANONICAL_SPEC.md).
 
-## Đợt tinh gọn kết quả kiểm tra sản phẩm (đang làm)
+## Đợt tinh gọn kết quả kiểm tra sản phẩm (đã gộp)
 
 Mốc bắt đầu: nhánh `codex/workflow-simplification`, commit `8078f362aea3322b06b681f4fec0b9d8dbcaad82`; `main` tại `b3005236636ff9f6d92f378f754e3bf5fe86e44a` là tổ tiên. Git sạch trước sửa. Đợt cũ đã được Owner nghiệm thu cách báo cáo, nhưng chưa gộp. Đợt này có phạm vi mới; bằng chứng và review đợt cũ không chứng nhận mã mới.
 
@@ -37,9 +37,9 @@ AI chỉ đánh dấu `[x]` sau khi xác minh, kèm commit và bằng chứng �
 ### E. Nghiệm thu và gộp
 - [x] Tạo ba ví dụ Owner từ mã mới tại `.workflow-local/workflow-single-product/OWNER_EXAMPLES.md` (dữ liệu giả).
 - [x] Ghi rõ trong ba ví dụ: dữ liệu giả, không có biên nhận Gemini/Luna qua bridge, model và usage chưa xác định.
-- [ ] Owner nghiệm thu đợt tinh gọn này; ghi đúng phạm vi được nghiệm thu.
-- [ ] Kiểm tra lại `main`, xung đột và bản mã định gộp.
-- [ ] Owner cho phép gộp riêng; sau đó gộp và ghi commit đích đã xác minh.
+- [x] Owner nghiệm thu đợt tinh gọn này ngày 2026-09-23: “Tôi nghiệm thu đợt tinh gọn và cho phép gộp nhánh vào main”.
+- [x] Kiểm tra lại `main`, xung đột và bản mã định gộp: nhánh sạch, `main` tại `b300523` là tổ tiên; 99/99 kiểm thử mã, 57/57 kiểm tra PowerShell và `git diff --check` đạt trước gộp.
+- [x] Owner cho phép gộp riêng trong cùng lời xác nhận; fast-forward `codex/workflow-simplification` vào `main` tại `de2e31cbc83d0b796b43043705bc8b450b793488`, đã kiểm tra quan hệ tổ tiên và Git sạch sau gộp.
 
 Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, người xử lý tiếp** tại đây. Khôi phục bằng cách đảo riêng commit đợt mới; không reset/xóa hồ sơ cũ.
 
@@ -50,6 +50,7 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 - Review độc lập trên commit `adf1127`: `NEEDS_FIX` (`review-adf1127.json`). Hai lỗi: helper mới chưa có trong hash nguồn bridge; `candidate_head` mâu thuẫn vẫn được chấp nhận. Một lượt sửa dùng 1/2 ngân sách đã chốt; kiểm thử hai lỗi đều RED trước sửa, GREEN sau sửa.
 - Kiểm thử sau lượt sửa: 99/99 PASS (`.workflow-local/workflow-single-product/final-gates-repair.log`).
 - Commit mã đã review: `3b002ea2fd21d91a4979fcd5de4dacaab799f7bf`. Review độc lập phiên mới PASS, không có phát hiện quan trọng. Hồ sơ `.workflow-local/workflow-single-product/{state,evidence,review}.json` ghi trạng thái chờ Owner nghiệm thu; chưa gộp vào `main`.
+- Owner nghiệm thu và cho phép gộp ngày 2026-09-23. `main` đã fast-forward đến `de2e31cbc83d0b796b43043705bc8b450b793488`; commit mã đã review `3b002ea` nằm trong lịch sử `main`. Kiểm thử tại commit đích trước khi gộp: 99/99 mã, 57/57 PowerShell; không chạy tài khoản Gemini/Luna thật qua Direct.
 
 ## Mốc đợt trước (lịch sử đã nghiệm thu cách báo cáo)
 - Nhánh: `codex/workflow-simplification`.
