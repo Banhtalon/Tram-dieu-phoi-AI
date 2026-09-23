@@ -47,8 +47,13 @@ test('Owner report distinguishes frozen non-applicability, review validity and m
   const lead = await buildReport(packet, { audience: 'lead' });
   assert.equal(lead.invocations.count, null);
   assert.equal(lead.invocations.usage.total_tokens, null);
+  await write('state.json', { ...state, run_id: 'fixture-run' });
+  await write('.receipts-chain.json', { schema_version: 'qq.workflow.receipt.v1', entries: [], last_receipt_sha256: null });
+  assert.match((await buildReport(packet)).execution_note, /chưa có biên nhận/);
+  await rm(path.join(packet, '.receipts-chain.json'));
+  await write('state.json', state);
 
-  for (const changed of [{ ...review, independent: false }, { ...review, head: 'c'.repeat(40) }, { ...review, material_findings: ['fixture finding'] }]) {
+  for (const changed of [{ ...review, independent: false }, { ...review, head: 'c'.repeat(40) }, { ...review, head: 'c'.repeat(40), candidate_head: identity.head }, { ...review, material_findings: ['fixture finding'] }]) {
     await write('review.json', changed);
     assert.match((await buildReport(packet)).owner_summary.independent_review, /Chưa xác minh/);
   }

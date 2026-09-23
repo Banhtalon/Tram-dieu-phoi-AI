@@ -48,7 +48,10 @@ function taskPathFor(state,packetDir){
 }
 
 function strictlyBound(object,identity){
-  return !!object&&typeof identity?.task_id==='string'&&identity.task_id.length>0&&Number.isInteger(identity.revision)&&typeof identity.head==='string'&&identity.head.length>0&&typeof identity.contract_sha256==='string'&&identity.contract_sha256.length>0&&object.task_id===identity.task_id&&object.revision===identity.revision&&object.contract_sha256===identity.contract_sha256&&(object.head===identity.head||object.candidate_head===identity.head);
+  return !!object&&typeof identity?.task_id==='string'&&identity.task_id.length>0&&Number.isInteger(identity.revision)&&typeof identity.head==='string'&&identity.head.length>0&&typeof identity.contract_sha256==='string'&&identity.contract_sha256.length>0&&object.task_id===identity.task_id&&object.revision===identity.revision&&object.contract_sha256===identity.contract_sha256&&
+    (object.head===identity.head||object.candidate_head===identity.head)&&
+    (object.head===undefined||object.head===identity.head)&&
+    (object.candidate_head===undefined||object.candidate_head===identity.head);
 }
 
 function blockersFor(state,evidence,review,audience='lead'){
@@ -215,7 +218,7 @@ async function receiptInvocations(packetDir,state,identity){
     if(typeof currentRun!=='string'||!currentRun||loaded.some(({receipt,descriptor})=>!['legacy','worker'].includes(descriptor.type)||receipt.run_id!==currentRun))return {items:[],observed:false};
   }
   for(const {receipt} of loaded)if(typeof receipt.receipt_id==='string'&&!seen.has(receipt.receipt_id)){seen.add(receipt.receipt_id);items.push(receipt);}
-  return {items,observed:true};
+  return {items,observed:items.length>0};
 }
 
 function gateSummary(evidence){return (Array.isArray(evidence?.gates)?evidence.gates:[]).map(g=>({id:scalar(g.id),status:g.code===0&&!g.timed_out&&!g.interrupted?'PASS':'NOT_PASS',code:g.code??null,timed_out:g.timed_out??null,interrupted:g.interrupted??null}));}
