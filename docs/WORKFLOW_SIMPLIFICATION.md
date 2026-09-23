@@ -5,8 +5,8 @@
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: E — reviewer đã yêu cầu sửa mâu thuẫn tài liệu; đã sửa, đang kiểm tra lại bản mới.
-- Người/AI xử lý tiếp: Lead chạy lại kiểm tra; reviewer độc lập đọc đúng commit sau sửa. Hai lần gọi Luna thất bại vì giới hạn, một phiên khác đã đánh giá và yêu cầu sửa.
+- Phần đang làm: E — BLOCKED_TECHNICAL. Review cuối phát hiện lỗi báo cáo; đã hết ngân sách sửa.
+- Người/AI xử lý tiếp: chờ Owner cho phép một lượt phục hồi bổ sung; sau đó Lead sửa và gửi reviewer độc lập đúng bản mới.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -27,19 +27,18 @@
 - [ ] G. Gộp bản đã duyệt khi Owner cho phép; ghi commit nhánh đích.
 
 ## Trạng thái bàn giao mới nhất
-- Commit mã đã review lần trước: `508b7afa1f7e944e202710a0ec37943a3967eb5b`; reviewer độc lập kết luận NEEDS_FIX vì mâu thuẫn giữa "ASSISTED stage" và Direct route trong canonical. `risk_checks_completed=true`, model quan sát được không xác định.
-- Sửa tại `653919f6a052753feb4b984080a6e293d8a7e413`: phân biệt giai đoạn tự động hóa ASSISTED với tuyến Direct mặc định. Không đổi runtime hoặc giới hạn Direct.
-- 67/67 kiểm thử đạt tại `508b7af`; đang chạy lại trên đầu mới. Hai lần gọi Luna trước đó lỗi giới hạn trước verdict; ghi riêng, không giả là review hoàn tất.
-- Lượt sửa 2/2 đã dùng; một review có verdict NEEDS_FIX trong giới hạn 3 review hoàn tất. Chưa PASS, chưa nghiệm thu, chưa gộp.
-- Hồ sơ: `.workflow-local/workflow-simplification/{contract,state,evidence,review}.json`, `final-gates.log`, `OWNER_EXAMPLES.md`, `product-observations.json`.
-- Tiếp theo: final gates → review độc lập đúng commit/hash → E → Owner F → G nếu có phép. Nếu vẫn có lỗi quan trọng, giữ BLOCKED_TECHNICAL; không tự đặt lại ngân sách.
+- Commit mã cuối được review: `8a908a53cf7c9f6ed033c6d9e4b4b7661b990cc3`; 67/67 kiểm thử và ba ví dụ giả PASS trên commit này, nhưng review độc lập `NEEDS_FIX`, không thể nghiệm thu.
+- Lỗi: file `product_check.json` có JSON hỏng vẫn làm báo cáo ghi “Không áp dụng” cho tác vụ nội bộ. Đã tái hiện bằng dữ liệu giả; báo cáo đúng phải là “Chưa xác minh”.
+- Ngân sách: 2/2 lượt sửa đã dùng; 2 review có verdict NEEDS_FIX, 2 lần gọi Luna lỗi giới hạn trước verdict. Không mở lượt sửa mới hoặc đổi revision để xóa bộ đếm.
+- Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phương án sửa cụ thể tại `SUPPLEMENTAL_REPAIR_PROPOSAL.md`.
+- Tiếp theo: Owner cho phép ledger phục hồi riêng gồm đúng một lượt sửa và một review, hoặc giữ trạng thái bị chặn. Chưa nghiệm thu, chưa gộp.
 
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
 |---|---|---|---|---|---|
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
-| B–D | Đã sửa, chờ review lại | `653919f` | 67/67 trước sửa tài liệu, đang kiểm tra lại | NEEDS_FIX tại `508b7af`, đã sửa | Final gates + review đúng bản mới |
-| E–G | Chưa làm | — | — | — | Theo thứ tự checklist |
+| B–D | Mã đã kiểm tra, chưa đạt review | `8a908a5` | 67/67 PASS | NEEDS_FIX, lỗi hồ sơ hỏng | Chờ quyền phục hồi bổ sung |
+| E–G | Bị chặn tại E | — | E có gate PASS, review NEEDS_FIX | Chưa PASS | Phục hồi có phép → F → G |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
