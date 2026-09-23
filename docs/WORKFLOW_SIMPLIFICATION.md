@@ -5,8 +5,8 @@
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: F — review độc lập PASS trên mã `041c177`; chờ Owner nghiệm thu ba ví dụ.
-- Người/AI xử lý tiếp: Owner nghiệm thu; sau đó Lead chờ quyền gộp rõ ràng.
+- Phần đang làm: G — Owner đã nghiệm thu cách báo cáo qua ba ví dụ ngày 2026-09-23; chờ quyền gộp.
+- Người/AI xử lý tiếp: Lead xác nhận nhánh đích không xung đột khi Owner cho phép gộp.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -41,7 +41,8 @@
 - Owner cho phép lượt phục hồi thứ ba đúng một sửa và một review; cả hai đã dùng 1/1, verdict `NEEDS_FIX`. Sổ riêng: `.workflow-local/workflow-simplification/third-supplemental-budget.json`; không đặt lại ngân sách bằng revision/task mới.
 - Owner cho phép lượt phục hồi thứ tư đúng một sửa và một review; cả hai đã dùng, review PASS, sổ riêng: `.workflow-local/workflow-simplification/fourth-supplemental-budget.json`.
 - Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phạm vi lượt sửa hiện tại tại `FOURTH_RECOVERY_PROPOSAL.md`.
-- Tiếp theo: Owner nghiệm thu ba ví dụ; việc gộp còn chờ quyền riêng. Chưa gộp.
+- Nghiệm thu Owner: “Tôi nghiệm thu cách báo cáo qua cả ba ví dụ” (2026-09-23). Đây là nghiệm thu nội dung báo cáo; chưa phải quyền gộp.
+- Tiếp theo: G — chờ Owner cho phép gộp; hiện chưa gộp.
 
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
@@ -49,7 +50,8 @@
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
 | B–D | Mã đã kiểm tra và review PASS | `7277fe2` | 68/68 PASS | PASS trên `041c177` | Owner nghiệm thu |
 | E | Hoàn tất kiểm tra/review | `7277fe2` | 68/68 PASS, diff-check sạch | PASS | F |
-| F–G | Chờ Owner | `041c177` | Ba ví dụ giả đã tạo | Reviewer PASS | Nghiệm thu → xin quyền gộp riêng |
+| F | Owner nghiệm thu | `041c177` | Ba ví dụ giả đã tạo; Owner xác nhận đạt | Reviewer PASS | G |
+| G | Chờ quyền gộp | `041c177` | Chưa kiểm tra nhánh đích sau nghiệm thu | Reviewer PASS | Xin quyền gộp riêng |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
