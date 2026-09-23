@@ -5,8 +5,8 @@
 ## Mốc hiện tại
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
-- Phần đang làm: E — BLOCKED_TECHNICAL. Review bản mới `NEEDS_FIX`; ngân sách bổ sung thứ ba đã dùng hết.
-- Người/AI xử lý tiếp: chờ Owner cho phép lượt phục hồi mới cho lỗi URL mâu thuẫn; Lead không tự mở lượt.
+- Phần đang làm: E — đã sửa lỗi đối chiếu Product Check trong lượt bổ sung thứ tư được Owner cho phép; chờ review độc lập.
+- Người/AI xử lý tiếp: reviewer độc lập kiểm tra commit mới; Lead đối soát verdict.
 - Trở ngại: Direct có giới hạn 262.144 byte; riêng ngữ cảnh đã chọn tối thiểu 266.529 byte, chưa cộng bản trước/sau và prompt.
 - Cách thực hiện: ASSISTED được Owner cho phép trong kế hoạch; chưa gọi Direct, không đổi giới hạn hoặc đặt lại lượt sửa.
 - Rủi ro: ELEVATED vì đổi quy tắc điều phối; chỉ dữ liệu giả, không đổi tài khoản hoặc dữ liệu thật.
@@ -34,18 +34,20 @@
 - Review độc lập tại `1ebabe3`: `NEEDS_FIX`. Nếu `product_check.json` PASS nhưng `ui_evidence.json` hỏng, Owner vẫn thấy “kiểm tra sản phẩm đã đạt” và bước gộp; reviewer đã tái hiện bằng dữ liệu giả. Phải xem toàn bộ hồ sơ trước khi báo đạt.
 - Commit mã sửa hồ sơ hỗn hợp: `2cc19171cf4cdba4385e87e6c47547011a0c3235`. Kiểm thử hồi quy thất bại trước sửa, đạt sau sửa; 67/67 kiểm thử đạt tại `third-recovery-gates.log`.
 - Bản bàn giao `8847fd34827ba0c8815e436743e97c495d231fa8` đạt 67/67 tại `third-recovery-final-gates.log`, `git diff --check` đạt; ba ví dụ Owner đã tạo lại. Review độc lập `NEEDS_FIX`: hai hồ sơ đều PASS, cùng định danh nhưng URL 3000/4000 mâu thuẫn với nhau và yêu cầu đã chốt; Owner vẫn bị báo đạt và gợi ý gộp.
+- Commit sửa đối chiếu: `7277fe2870037db565a91277b23fbcfef65541ad`. Thêm kiểm thử URL sai, task bị đổi sau khóa và task thiếu; kiểm thử báo cáo 3/3 đạt.
 - Ngân sách gốc: 2/2 lượt sửa đã dùng; 2 review NEEDS_FIX, 2 lần gọi Luna lỗi giới hạn trước verdict. Ngân sách bổ sung Owner cho phép cũng đã dùng 1/1 lượt sửa và 1/1 review; ghi riêng tại `.workflow-local/workflow-simplification/supplemental-budget.json`, không đặt lại ngân sách gốc.
 - Owner cho phép lượt phục hồi thứ hai đúng một sửa và một review; cả hai đã dùng 1/1, sổ riêng: `.workflow-local/workflow-simplification/second-supplemental-budget.json`.
 - Owner cho phép lượt phục hồi thứ ba đúng một sửa và một review; cả hai đã dùng 1/1, verdict `NEEDS_FIX`. Sổ riêng: `.workflow-local/workflow-simplification/third-supplemental-budget.json`; không đặt lại ngân sách bằng revision/task mới.
-- Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phạm vi lượt sửa hiện tại tại `THIRD_RECOVERY_PROPOSAL.md`.
-- Tiếp theo: chỉ khi Owner cho phép lượt mới, Lead thêm kiểm thử URL mâu thuẫn, sửa điều kiện báo đạt và review đúng bản mới. Chưa nghiệm thu, chưa gộp.
+- Owner cho phép lượt phục hồi thứ tư đúng một sửa và một review; lượt sửa đã dùng, review chờ, sổ riêng: `.workflow-local/workflow-simplification/fourth-supplemental-budget.json`.
+- Hồ sơ local: `.workflow-local/workflow-simplification/{state,evidence,review}.json`; phạm vi lượt sửa hiện tại tại `FOURTH_RECOVERY_PROPOSAL.md`.
+- Tiếp theo: chạy gate chuẩn, tạo lại ba ví dụ và review độc lập đúng bản mới. Chưa nghiệm thu, chưa gộp.
 
 ## Bằng chứng từng phần
 | Phần | Đang ở bước nào | Commit mã nguồn | Kiểm tra | Review | Việc tiếp theo |
 |---|---|---|---|---|---|
 | A | Đã chuẩn bị | Nền `6ed6a58` | Git sạch trước sửa | Chưa review đợt này | B–D |
-| B–D | Mã đã kiểm tra, review NEEDS_FIX | `2cc1917` | 67/67 PASS | Review `8847fd3` tìm URL mâu thuẫn | Chờ quyền sửa bổ sung |
-| E–G | Bị chặn tại E | `2cc1917` | E có gate PASS | Chưa PASS | Sửa có phép → review → F → G |
+| B–D | Mã đã kiểm tra, chờ review mới | `7277fe2` | Report test 3/3 PASS | Review cũ NEEDS_FIX; bản mới chưa review | Gate đầy đủ → review |
+| E–G | Chờ review tại E | `7277fe2` | Gate đầy đủ đang chờ | Chưa PASS | Review → F → G |
 
 ## Kiểm tra và nghiệm thu dự kiến
 Chạy tại thư mục gốc dự án:
