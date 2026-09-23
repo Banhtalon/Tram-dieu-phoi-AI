@@ -31,8 +31,8 @@ AI chỉ đánh dấu `[x]` sau khi xác minh, kèm commit và bằng chứng �
 ### D. Kiểm tra độc lập
 - [x] Kiểm thử tác vụ mới và hồ sơ cũ đạt; dùng dữ liệu giả, không gọi AI thật (98/98 tại `final-gates.log`).
 - [x] Các kiểm thử review đúng commit, che bí mật và chưa gộp vẫn đạt (cùng bộ 98/98).
-- [ ] Chạy bộ kiểm thử cuối đã chốt và `git diff --check`; ghi commit mã và kết quả (sau sửa review: 99/99 đạt, chờ commit và diff-check cuối).
-- [ ] Reviewer độc lập PASS trên đúng commit cuối; sửa mã sau đó phải review lại.
+- [x] Chạy bộ kiểm thử cuối đã chốt và `git diff --check`; commit mã `3b002ea`, 99/99 đạt tại `final-gates-repair.log`, diff-check đạt.
+- [x] Reviewer độc lập PASS trên đúng commit mã `3b002ea` (`.workflow-local/workflow-single-product/review.json`); sửa mã sau đó phải review lại.
 
 ### E. Nghiệm thu và gộp
 - [x] Tạo ba ví dụ Owner từ mã mới tại `.workflow-local/workflow-single-product/OWNER_EXAMPLES.md` (dữ liệu giả).
@@ -48,9 +48,10 @@ Khi bị chặn, giữ ô chưa tick và ghi **nguyên nhân, bằng chứng, ng
 - Kiểm thử RED/GREEN: thiếu module đọc kết quả và báo cáo chấp nhận hồ sơ phụ trước sửa; sau sửa 7/7 kiểm thử liên quan đạt. Bằng chứng cuối và review sẽ ghi sau commit.
 - Bộ kiểm thử cuối: 98/98 PASS (`.workflow-local/workflow-single-product/final-gates.log`). Chưa chạy Gemini/Luna thật qua Direct; đây là dữ liệu giả và kiểm thử cục bộ.
 - Review độc lập trên commit `adf1127`: `NEEDS_FIX` (`review-adf1127.json`). Hai lỗi: helper mới chưa có trong hash nguồn bridge; `candidate_head` mâu thuẫn vẫn được chấp nhận. Một lượt sửa dùng 1/2 ngân sách đã chốt; kiểm thử hai lỗi đều RED trước sửa, GREEN sau sửa.
-- Kiểm thử sau lượt sửa: 99/99 PASS (`.workflow-local/workflow-single-product/final-gates-repair.log`); chờ commit và review lại trên commit cuối.
+- Kiểm thử sau lượt sửa: 99/99 PASS (`.workflow-local/workflow-single-product/final-gates-repair.log`).
+- Commit mã đã review: `3b002ea2fd21d91a4979fcd5de4dacaab799f7bf`. Review độc lập phiên mới PASS, không có phát hiện quan trọng. Hồ sơ `.workflow-local/workflow-single-product/{state,evidence,review}.json` ghi trạng thái chờ Owner nghiệm thu; chưa gộp vào `main`.
 
-## Mốc hiện tại
+## Mốc đợt trước (lịch sử đã nghiệm thu cách báo cáo)
 - Nhánh: `codex/workflow-simplification`.
 - Commit nền: `6ed6a586cf33e86b12aa2755129669502d610835`.
 - Phần đang làm: G — Owner đã nghiệm thu cách báo cáo qua ba ví dụ ngày 2026-09-23; chờ quyền gộp.
