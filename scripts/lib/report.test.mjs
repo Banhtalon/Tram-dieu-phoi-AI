@@ -47,6 +47,14 @@ test('Owner report distinguishes frozen non-applicability, review validity and m
   const lead = await buildReport(packet, { audience: 'lead' });
   assert.equal(lead.invocations.count, null);
   assert.equal(lead.invocations.usage.total_tokens, null);
+  await write('product_check.json', { ...identity, status: 'PASS', criteria_passed: true, checks: [{ action: 'fixture', observed: 'fixture', passed: true }] });
+  await writeFile(path.join(packet, 'ui_evidence.json'), '{broken-json');
+  const mixedProduct = await buildReport(packet);
+  assert.match(mixedProduct.owner_summary.product_check, /Chưa xác minh/);
+  assert.ok(mixedProduct.blockers.length > 0);
+  assert.doesNotMatch(mixedProduct.next_step, /gộp/);
+  await rm(path.join(packet, 'product_check.json'));
+  await rm(path.join(packet, 'ui_evidence.json'));
   await write('state.json', { ...state, run_id: 'fixture-run' });
   await write('.receipts-chain.json', { schema_version: 'qq.workflow.receipt.v1', entries: [], last_receipt_sha256: null });
   assert.match((await buildReport(packet)).execution_note, /chưa có biên nhận/);

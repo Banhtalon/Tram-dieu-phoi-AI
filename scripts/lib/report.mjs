@@ -246,12 +246,13 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const productCandidates=[...productFiles.map(file=>file.value),task?.ui_evidence];
   const validProduct=value=>strictlyBound(value,identity)&&value.status==='PASS'&&value.criteria_passed===true&&Array.isArray(value.checks)&&value.checks.length>0&&
     value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim());
-  const product=productCandidates.find(validProduct)??null;
+  const productEvidenceInvalid=productFiles.some(file=>file.invalid)||productCandidates.some(value=>value!=null&&!validProduct(value));
+  const product=productEvidenceInvalid?null:productCandidates.find(validProduct)??null;
   const reviewValid=!!review&&review.verdict==='PASS'&&review.independent===true&&review.material_findings.length===0;
   let productNotApplicable=false;
   if(!identityConflict&&strictlyBound(task,identity)&&task.schema_version==='qq.workflow.task.v10.1'&&task.user_visible===false&&
       (task.product_checks??task.product_check)?.applicable===false&&
-      !productFiles.some(file=>file.invalid)&&!productCandidates.some(value=>value!=null&&!validProduct(value))){
+      !productEvidenceInvalid){
     try{
       // Legacy v10 does not freeze product_check, so it cannot prove non-applicability.
       const {assertControlledContract}=await import('./controlled-bridge.mjs');
@@ -261,6 +262,7 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   }
   const receiptData=await receiptInvocations(packetDir,state,identity);
   const preliminaryBlockers=blockersFor(state,evidence,review,audience);
+  if(productEvidenceInvalid)preliminaryBlockers.push(audience==='owner'?'Chưa xác minh bằng chứng kiểm tra sản phẩm; Lead cần đối soát hồ sơ.':'Product evidence is unreadable or does not match; Lead reconciliation is required.');
   if(identityConflict)preliminaryBlockers.push(audience==='owner'?'Lead cần đối soát định danh task và checkpoint.':'Task and checkpoint identity conflict; Lead reconciliation is required.');
   if(['READY_FOR_OWNER','DONE'].includes(state.status)&&!evidence)preliminaryBlockers.push(audience==='owner'?'Chưa có bằng chứng kiểm tra hợp lệ cho bản hiện tại.':'Current bound gate evidence is unavailable.');
   if(['READY_FOR_OWNER','DONE'].includes(state.status)&&!review)preliminaryBlockers.push(audience==='owner'?'Chưa có review hợp lệ cho bản hiện tại.':'Current bound review is unavailable.');
