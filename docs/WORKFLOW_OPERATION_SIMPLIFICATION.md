@@ -1,6 +1,6 @@
 # Checklist tinh gọn vận hành
 
-Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây là sổ tiến độ của đợt mới, không bổ sung quy tắc. Hồ sơ cục bộ: `.workflow-local/workflow-operation-simplification/`; SHA-256 hợp đồng phiên bản 2: `6f7f8147cf65e0c90ba4998308daa4f5e5f81d23ecb78d044c20aaa19ea81c00`.
+Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây là sổ tiến độ của đợt mới, không bổ sung quy tắc. Hồ sơ cục bộ: `.workflow-local/workflow-operation-simplification/`; SHA-256 hợp đồng phiên bản 3: `4e62724f7d7c3f3f62552f875b124eae8e5f600a577815e064001da4d3ae6e97`.
 
 **Cách đánh dấu:** Chỉ đổi `[ ]` thành `[x]` sau khi đã làm và ghi bằng chứng thật ở phần kết quả. Nếu thất bại hoặc chưa rõ, để nguyên `[ ]`, ghi nguyên nhân và người xử lý tiếp. Sửa mã sau review thì mở lại mục kiểm tra/review bị ảnh hưởng. Nghiệm thu và quyền gộp chỉ đánh dấu theo lời xác nhận của Owner.
 
@@ -44,7 +44,7 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - [x] E3. `python mcp/test_antigravity_server.py` đạt.
 - [x] E4. `git diff --check` đạt; liên kết tài liệu và lệnh mẫu đúng.
 - [x] E5. Direct giữ giới hạn 256 KiB, bảo vệ bí mật, ngân sách, review độc lập và bước nghiệm thu.
-- [x] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
+- [ ] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
 - [x] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
 - [ ] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
 - [ ] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
@@ -67,6 +67,8 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - Review c211da1: NEEDS_FIX — `resume` thiếu state có thể khởi tạo mới, `recover` thiếu operator, HANDOFF ghim checklist tạm thời. Đã sửa và review lại trên commit `4affed8` với kết quả PASS.
 - E6: reviewer độc lập PASS trên đúng commit mã `4affed84c6fdc01a551cf418c99fc2c09e4da901`, đối chiếu từ nền `fc5c5bc`; không còn phát hiện quan trọng. Lần đầu `c211da1` là NEEDS_FIX, đã sửa và review lại.
 - E7: đã báo Owner phần bỏ, phần giữ, kết quả và giới hạn chưa gọi AI thật trong cập nhật của đợt này.
+- Hotfix theo yêu cầu Owner sau bài thử đăng nhập: trước khi đóng băng task mới, Lead đối chiếu gate với hành vi, trường hợp sai có thể xảy ra và câu chữ Owner thực sự yêu cầu; `repairs` đếm lượt Gemini sửa thực tế, `change_requests` đếm yêu cầu của Luna. Trường hợp 2 lượt Gemini và 2 yêu cầu sửa phải báo `repairs=1`, `change_requests=2`.
+- Hợp đồng phiên bản 3 thay phiên bản 2 cho hotfix này. Review PASS của commit `4affed8` chỉ áp dụng cho nguồn cũ; E6 mở lại cho commit mã mới. Bộ kiểm tra Node 105/105, PowerShell 57/57 và Python smoke exit 0 đã chạy sau hotfix; chưa gọi tài khoản AI thật.
 - Commit mã đã review: `4affed84c6fdc01a551cf418c99fc2c09e4da901`.
 - Commit đích sau gộp: chưa có.
 - Trở ngại/người xử lý tiếp: chờ Owner nghiệm thu và cho phép gộp riêng (E8/E9). Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.

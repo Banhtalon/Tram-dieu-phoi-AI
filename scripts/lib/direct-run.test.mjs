@@ -27,6 +27,11 @@ test('Direct status and completed accept explain ownership without claiming inte
     assert.doesNotMatch(result.owner_message, /synthetic private detail/);
     if (status === 'COMPLETED') assert.deepEqual(await acceptDirect(manifestPath, 'fixture-owner'), result);
   }
+  await writeFile(path.join(root, 'state.json'), JSON.stringify({ status: 'RETRY_EXHAUSTED', task_id: task.task_id, attempt: 2, rework_count: 2 }));
+  const exhausted = await statusDirect(manifestPath);
+  assert.equal(exhausted.attempts, 2);
+  assert.equal(exhausted.repairs, 1);
+  assert.equal(exhausted.change_requests, 2);
 });
 
 test('one process, at most one repair, close on PASS/block/error and preserve instruction', async () => {

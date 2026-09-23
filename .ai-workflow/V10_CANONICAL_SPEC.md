@@ -100,6 +100,13 @@ model name, and a provider name is not a role.
 1. Read host task state; protect uncommitted work. Create one feature branch/checkpoint.
 2. Write a short contract: behavior, exclusions, base SHA, acceptance criteria, gates,
    user_visible and risk/complexity. Freeze before implementation.
+   Lead checks each gate against the behavior the Owner requested before freezing:
+   name the user action, observable success and a plausible wrong result the gate
+   rejects. For interactive input, cover a material invalid or incomplete input
+   when applicable. Do not add exact wording or presentation requirements that
+   the Owner did not request. If no executable gate can distinguish the cases,
+   record the manual check and its limit. A frozen task's gates and budget are not
+   changed to rescue a failed run; contract changes need the normal new revision.
 3. Use one writer. Lead works or hands off via shared files and available tools.
 4. Run relevant checks during development. No mandatory full suite for every tiny edit.
 5. At feature completion, commit code, inspect actual diff, run agreed final gates.

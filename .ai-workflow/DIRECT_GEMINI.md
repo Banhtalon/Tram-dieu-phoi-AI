@@ -13,6 +13,13 @@ Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc v
 5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
+Trước `prepare`, Lead chép các mục sau vào checklist của task và chỉ đánh dấu `[x]` khi đã ghi bằng chứng trong packet:
+
+- [ ] Hành động và kết quả quan sát được khớp yêu cầu Owner.
+- [ ] Phép kiểm tra bắt được một kết quả sai có thể xảy ra; với biểu mẫu, thử đầu vào thiếu/sai khi phù hợp.
+- [ ] Không tự thêm điều kiện đúng từng chữ hoặc dấu câu mà Owner chưa yêu cầu.
+- [ ] Nếu không kiểm tra tự động được, ghi bước kiểm tra tay và giới hạn của nó.
+
 ## Cú pháp PowerShell
 
 `status` và `accept` trả thêm `owner_message` tiếng Việt, giữ nguyên `status`. `COMPLETED` là hoàn tất trong vùng riêng, chưa xác nhận đưa vào dự án chính. Lead ghi commit đích vào checklist sau khi được phép gộp và xác minh.
@@ -30,6 +37,7 @@ node scripts/direct.mjs accept "$newOutput/prepared.json" Owner
 ```
 
 Mỗi lần chạy tạo báo cáo UUID riêng và một `dispatch.json` chống chạy lặp. Báo cáo chỉ chứa model/session, gate, số dispatch có bằng chứng, cleanup và vị trí evidence; số lần gọi nội bộ provider không biết thì ghi unknown. Không suy đoán token tiết kiệm. Tổng dispatch tối đa không bao gồm lượt review mã công cụ, phải ghi hai ngân sách riêng.
+Trong báo cáo, `attempts`/`worker_attempts_completed` là tổng lượt Gemini, `repairs` là số lượt Gemini đã sửa sau lượt đầu, còn `change_requests` là số lần Luna yêu cầu sửa; yêu cầu cuối có thể chạm trần mà không tạo thêm lượt Gemini.
 
 Chỉ một tác vụ được ghi quyền tài khoản trên máy tại một thời điểm. Đóng cưỡng bức có thể bỏ qua cleanup: giữ packet, xác minh worker đã dừng, đối chiếu đúng quyền tạm; không ghi đè toàn bộ settings hoặc tự chạy lại. Không sửa thư mục RESTORE. Các runner R2/WEB cũ là bằng chứng lịch sử, không phải điểm chạy mặc định.
 
