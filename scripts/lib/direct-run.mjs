@@ -28,9 +28,10 @@ const completedAttempts = state => {
 const completedRepairs = state => { const attempts = completedAttempts(state); return attempts === null ? null : Math.max(0, attempts - 1); };
 const inside = (root, file) => { const rel = path.relative(root, file); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 const errorCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code ?? '') ? error.code : 'DIRECT_RUN_FAILED';
-const requireDirectReviewer = config => {
+const requireDirectReviewer = (config, { allowLegacy = false } = {}) => {
   requireValue(config.reviewer?.provider === 'openai' && config.reviewer?.cli === 'codex' &&
-    config.reviewer?.model === 'gpt-5.6-luna' && config.reviewer?.effort === 'max', 'LUNA_REVIEWER_REQUIRED');
+    (config.reviewer?.model === 'gpt-6-luna' || (allowLegacy && config.reviewer?.model === 'gpt-5.6-luna')) &&
+    config.reviewer?.effort === 'max', 'LUNA_REVIEWER_REQUIRED');
   requireValue(!config.fallback_reviewer, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
 };
 
@@ -126,7 +127,7 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
   requireValue(git(m.repo, 'rev-parse', 'HEAD') === task.base_sha, 'BASE_MISMATCH');
   await assertControlledContract(m.taskPath, task);
   requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
-  requireDirectReviewer(config);
+  requireDirectReviewer(config, { allowLegacy: true });
   requireValue(config.lifecycle.max_rework === 2 && config.lifecycle.checkpoint_required === true && !config.fallback_reviewer, 'BUDGET_MISMATCH');
   requireValue(config.worker.local_trial === true && !config.test_mode && !config.worker.skip_permissions, 'UNSAFE_CONFIG');
   assertWorkerIsolation(config, { repoRoot: m.repo, controlRoot: path.dirname(manifestPath) });

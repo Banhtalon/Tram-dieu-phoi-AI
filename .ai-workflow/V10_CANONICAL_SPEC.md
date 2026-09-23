@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.8 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.9 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -251,8 +251,9 @@ same-process repair and two independent reviews. It stops on failures or exhaust
 budget; a new task/revision does not authorize another attempt. Worker file scope is
 exact; the controller runs gates, and the worker must not run shell/gates or access
 control files. The direct workflow requires a Gemini 3.8 Flash High MCP worker to
-implement, controller-run gates to test, an independent OpenAI Codex model gpt-5.6-luna
-at effort max (Luna Max) review, then Owner acceptance at the checkpoint. Luna is
+implement, controller-run gates to test, an independent OpenAI Codex model gpt-6-luna
+at effort max (Luna Max) review for newly prepared Direct tasks, then Owner acceptance
+at the checkpoint. Previously frozen Direct tasks keep their gpt-5.6-luna binding. Luna is
 reviewer only, never worker or runner. The direct entrypoint does not accept or dispatch
 a fallback reviewer. PASS stops at the Owner checkpoint; only explicit Owner acceptance
 permits `accept`. Forced termination requires manual permission/workspace reconciliation

@@ -71,7 +71,7 @@ test('real preparation/layout + lifecycle fake boundary, missing helper and paus
     write_paths: ['old.txt', 'new.txt'], allowed_paths: ['old.txt', 'new.txt'], lane: 'NORMAL', initial_lane: 'NORMAL', initial_risk: 'LOW', product_check: { applicable: false, reason: 'fixture' }, candidate_head: null, contract_sha256: null };
   const config = { schema_version: 'qq.bridge.v2', billing: 'SUBSCRIPTION_ONLY', mode: 'ASSISTED', timeout_seconds: 30, write_paths: task.write_paths, gate_paths: ['gate.mjs'],
     worker: { transport: 'mcp', server: 'antigravity_worker', provider: 'mcp', command: ['python', 'mcp/antigravity_server.py'], model: 'gemini-3.8-flash-high', local_trial: true, local_trial_root: worktrees, skip_permissions: false },
-    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-luna', effort: 'max' } };
+    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-6-luna', effort: 'max' } };
   const m = await prepareDirect(repo, task, config, output), manifest = path.join(output, 'prepared.json');
   await assert.rejects(prepareDirect(repo, task, config, output), /OUTPUT_EXISTS/);
   const control = path.join(repo, '.workflow-local', 'ai-control.desired_state');
@@ -134,7 +134,7 @@ test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Lun
   const validConfig = JSON.parse((await readFile(new URL('../../.ai-workflow/BRIDGE_CONFIG.direct.example.json', import.meta.url), 'utf8')).replace(/^\uFEFF/, ''));
   validConfig.write_paths = task.write_paths;
   validConfig.worker.local_trial_root = worktrees;
-  assert.equal(validConfig.reviewer.model, 'gpt-5.6-luna');
+  assert.equal(validConfig.reviewer.model, 'gpt-6-luna');
   assert.equal(validConfig.reviewer.effort, 'max');
   assert.equal(validConfig.fallback_reviewer, undefined);
 
@@ -148,7 +148,7 @@ test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Lun
 
   const formerGemini = { provider: 'google', cli: 'antigravity', command: ['agy'], model: 'gemini-3.8-flash-high', agent: 'ag-reviewer-011-r1', agent_definition_sha256: 'ef23a4c0616a77d1d5b982c02ea07ec281c00de5d86aaa42523714b0678bdaea' };
 
-  const invalidReviewers = [formerGemini, { ...validConfig.reviewer, model: 'gpt-5.6-terra' },
+  const invalidReviewers = [formerGemini, { ...validConfig.reviewer, model: 'gpt-5.6-luna' }, { ...validConfig.reviewer, model: 'gpt-5.6-terra' },
     { ...validConfig.reviewer, effort: 'high' }, { ...validConfig.reviewer, provider: 'google' },
     { ...validConfig.reviewer, cli: 'antigravity' }];
   for (const [index, reviewer] of invalidReviewers.entries()) {
@@ -179,6 +179,25 @@ test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Lun
   await testCheckDirectRejection({ ...validConfig.reviewer, model: 'gpt-5.6-terra' }, undefined, 'LUNA_REVIEWER_REQUIRED');
   await testCheckDirectRejection({ ...validConfig.reviewer, effort: 'high' }, undefined, 'LUNA_REVIEWER_REQUIRED');
   await testCheckDirectRejection(undefined, { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-terra', effort: 'high' }, 'FALLBACK_REQUIRES_SEPARATE_DECISION');
+
+  const legacyRoot = path.join(root, 'legacy-output'), legacyTaskDir = path.join(path.dirname(m.taskPath), 'legacy');
+  await Promise.all([mkdir(legacyRoot), mkdir(legacyTaskDir)]);
+  const legacySettings = path.join(root, 'legacy-settings.json');
+  await writeFile(legacySettings, JSON.stringify({ permissions: { allow: [], deny: [] } }));
+  const legacyConfig = structuredClone(preparedConfig);
+  legacyConfig.reviewer = { ...legacyConfig.reviewer, model: 'gpt-5.6-luna', command: [process.execPath] };
+  legacyConfig.worker.command[0] = process.execPath;
+  legacyConfig.worker.cli = process.execPath;
+  legacyConfig.worker.temporary_permissions.settingsPath = legacySettings;
+  legacyConfig.lifecycle.control_root = legacyRoot;
+  const legacyTaskPath = path.join(legacyTaskDir, `${task.task_id}.json`);
+  const legacyConfigPath = path.join(legacyRoot, 'config.json');
+  await freezeControlledTask(legacyTaskPath, task, legacyConfig);
+  await writeFile(legacyConfigPath, JSON.stringify(legacyConfig));
+  const legacyManifestPath = path.join(legacyRoot, 'prepared.json');
+  await writeFile(legacyManifestPath, JSON.stringify({ repo, taskPath: legacyTaskPath, configPath: legacyConfigPath,
+    packetDir: path.join(legacyRoot, task.task_id), helper_sha256: m.helper_sha256 }));
+  assert.equal((await checkDirect(legacyManifestPath)).config.reviewer.model, 'gpt-5.6-luna');
 });
 
 test('visible Direct preparation proves good/bad gate behavior and Product Check shape before freezing', async t => {
@@ -208,7 +227,7 @@ if(!ok)process.exitCode=1;`);
   const config = { schema_version: 'qq.bridge.v2', billing: 'SUBSCRIPTION_ONLY', mode: 'ASSISTED', timeout_seconds: 20,
     write_paths: task.write_paths, gate_paths: ['check.mjs'],
     worker: { transport: 'mcp', server: 'antigravity_worker', provider: 'mcp', command: ['python', 'placeholder'], model: 'gemini-3.8-flash-high', local_trial: true, local_trial_root: path.join(root, 'worktrees'), skip_permissions: false },
-    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-luna', effort: 'max' },
+    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-6-luna', effort: 'max' },
     product_check: { command: [process.execPath, 'check.mjs'] },
     preflight: { good_cwd: good, bad_cwd: bad, good_target_url: pathToFileURL(path.join(good, 'page.html')).href } };
   await assert.rejects(prepareDirect(repo, task, { ...config, preflight: undefined }, output), /PREFLIGHT_REQUIRED/);
