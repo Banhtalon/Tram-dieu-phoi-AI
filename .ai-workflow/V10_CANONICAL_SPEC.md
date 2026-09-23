@@ -342,8 +342,10 @@ The code is non-retryable and preserves timeout, exit, model, conversation and b
 evidence fields so a scope finding cannot hide a simultaneous execution failure.
 
 ## Stage boundary
-ASSISTED is the default. Lead can execute locally and use already available
-independent sessions/tools; missing capability is WAITING_CAPABILITY.
+ASSISTED is the default automation stage; within it, new work uses the Direct
+Gemini → controller gates → Luna route defined above. Lead may use local tools
+and an independent session under the pre-dispatch ASSISTED exception; missing
+capability is WAITING_CAPABILITY.
 The sequential CLI bridge can run explicit supervised pilots while ASSISTED.
 LOCAL_AUTO requires installation, actual account/model probes and a successful
 handoff/repair pilot on Windows. Merely editing a config field is insufficient.
