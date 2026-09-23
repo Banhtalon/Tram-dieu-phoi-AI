@@ -13,7 +13,6 @@ export const REFERENCE_GUIDANCE_FILES = [
   ".ai-workflow/HANDOFF_FILES.md",
   ".ai-workflow/DATA_MODEL.md",
   ".ai-workflow/CLI_BRIDGE.md",
-  ".ai-workflow/FAST_LANE.md",
   ".ai-workflow/MIGRATION.md",
   ".ai-workflow/OWNER_GUIDE.md",
   ".ai-workflow/prompts/LEAD_BOOTSTRAP.md",

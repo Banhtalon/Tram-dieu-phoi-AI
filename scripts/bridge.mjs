@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {readJson} from './lib/workflow.mjs';
-import {inspect,runBridge,quotaDrill,activate} from './lib/bridge.mjs';
+import {inspect,runBridge} from './lib/bridge.mjs';
 import {redactText} from './lib/redact.mjs';
 import {attachCheckpointReports,buildReport,formatReport} from './lib/report.mjs';
 
@@ -9,6 +9,9 @@ const controller=new AbortController();
 process.on('SIGINT',()=>controller.abort());process.on('SIGTERM',()=>controller.abort());
 try {
   let result,packetDir;
+  if (['pilot','run','quota-drill','activate'].includes(command)) {
+    throw Object.assign(Error('New legacy dispatch is retired; use Direct. For an existing frozen packet, inspect and resume its original task.'), { code: 'LEGACY_NEW_DISPATCH_DISABLED' });
+  }
   if(command==='report') {
     const [dir,...flags]=args;
     if(!dir)throw Error('Usage: bridge.mjs report <packets> [--audience owner|lead] [--format json|md]');
@@ -25,10 +28,10 @@ try {
       const {healthCheck}=await import('./lib/harness-lifecycle.mjs');
       result=await healthCheck({repoRoot:path.resolve(cwd),config:loadedConfig});
     } else result=await inspect(path.resolve(cwd),loadedConfig,path.resolve(dir),flags.includes('--probe'),controller.signal);
-  } else if(['pilot','run','resume'].includes(command)) {
+  } else if(command==='resume') {
     const [config,task,cwd,dir]=args;
     packetDir=dir;
-    result=await runBridge({config:await readJson(config),taskPath:task,cwd,packetDir,pilot:command==='pilot'||(command==='resume'&&args.includes('--pilot')),resume:command==='resume',signal:controller.signal});
+    result=await runBridge({config:await readJson(config),taskPath:task,cwd,packetDir,pilot:args.includes('--pilot'),resume:true,signal:controller.signal});
   } else if(['request-changes','continue','checkpoint','reject-checkpoint','complete','recover','reconcile'].includes(command)) {
     const [config,task,cwd,dir,...rest]=args;
     const lifecycle=await import('./lib/harness-lifecycle.mjs');
@@ -44,17 +47,15 @@ try {
   } else if(command==='stale-scan') {
     const {scanStaleTasks}=await import('./lib/harness-lifecycle.mjs');
     result=await scanStaleTasks({packetRoot:path.resolve(args[0])});
-  } else if(command==='quota-drill')result=await quotaDrill(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
-  else if(command==='activate')result=await activate(await readJson(args[0]),path.resolve(args[1]),path.resolve(args[2]));
-  else if(command==='status')result=await readJson(path.join(args[0],'state.json'));
-  else throw Error('Usage: bridge.mjs doctor <config> <repo> <packets> [--probe] | pilot/run/resume <config> <task> <repo> <packets> [--pilot] | request-changes/continue/checkpoint/complete <config> <task> <repo> <packets> [instruction] | quota-drill <config> <accepted-pilot-packets> <activation-packets> | activate <config> <accepted-pilot-packets> <activation-packets> | status <packets> | report <packets> [--audience owner|lead] [--format json|md]');
+  } else if(command==='status')result=await readJson(path.join(args[0],'state.json'));
+  else throw Error('Usage: bridge.mjs doctor <config> <repo> <packets> [--probe] | resume <config> <task> <repo> <packets> [--pilot] | request-changes/continue/checkpoint/complete <config> <task> <repo> <packets> [instruction] | status <packets> | report <packets> [--audience owner|lead] [--format json|md]');
   if(command!=='report'){
     if(result?.schema_version?.startsWith('qq.workflow.')){
       console.log(redactText(JSON.stringify(result,null,2)));
       process.exitCode=['PASS','FROZEN','CLAIMED','READY_TO_DISPATCH','RUNNING','READY_FOR_REVIEW','REQUEST_CHANGES','REWORKING','WAITING_FOR_CHECKPOINT','CHECKPOINTED','COMPLETED','PAUSED'].includes(result.status)?0:1;
     } else {
       const summary={status:result.status,head:result.head,repair_rounds:result.repair_rounds,senior_passes:result.senior_passes,reconciliation_required:result.reconciliation_required};
-      const output=['pilot','run','resume'].includes(command)?await attachCheckpointReports(summary,packetDir):{result:summary,reportFailed:false};
+      const output=command==='resume'?await attachCheckpointReports(summary,packetDir):{result:summary,reportFailed:false};
       console.log(JSON.stringify(output.result,null,2));
       process.exitCode=output.reportFailed?1:['ACCEPTED','PROBED','READY_FOR_OWNER','DONE','QUOTA_DRILL_PASS'].includes(result.status)?0:1;
     }

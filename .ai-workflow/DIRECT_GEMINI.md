@@ -7,9 +7,9 @@
 Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc và kích thước prompt. Nếu Direct đã biết không phù hợp, xem ngoại lệ ASSISTED tại [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow). Lead ghi lý do và thông báo; Owner không phải chọn cách chạy. Không dùng ngoại lệ để chạy lại Direct đã thất bại, vượt ngân sách hoặc chưa rõ kết quả.
 
 1. Dùng task `qq.workflow.task.v10.1` và config `qq.bridge.v2` hiện có; chốt repo chính, base SHA, mục tiêu, tiêu chí, exact `allowed_paths`/`write_paths` và gates. Owner chỉ cần mô tả công việc. Điều phối soạn JSON.
-2. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Direct preflight không còn yêu cầu hoặc đọc định nghĩa agent Gemini no-tools, kiểm tra thuê bao Antigravity và quyền ghi tạm thời của worker vẫn giữ nguyên. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
-3. Chạy `prepare`, rồi `check`; hai lệnh này không gọi model. `prepare` tạo task/lock và helper dưới `.workflow-local/direct/<task_id>`, packet bên ngoài repo, giữ nguyên trạng thái paused/stopped. Chỉ hỗ trợ repo chính, không dùng một worktree làm repo nguồn. Thêm `.workflow-local/` vào ignore của repo trước khi chuẩn bị.
-4. Chạy `run` đúng một lần. Tối đa hai lượt worker và hai lượt reviewer, chỉ một repair trong cùng tiến trình. Worker Gemini thực hiện (Gemini implement), controller tự chạy gate (controller tests), và OpenAI Codex Luna Max kiểm tra độc lập (Luna Max independent review). Worker chỉ dùng file tools trên file được giao.
+2. Bắt đầu từ [mẫu cấu hình Direct](BRIDGE_CONFIG.direct.example.json). Thay `write_paths` bằng đúng các file được giao, `gate_paths` bằng file bảo vệ cho các lệnh kiểm tra, và `local_trial_root` bằng thư mục tuyệt đối bên ngoài repo và packet. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-5.6-luna`, `effort:max`. Direct preflight không còn yêu cầu hoặc đọc định nghĩa agent Gemini no-tools, kiểm tra thuê bao Antigravity và quyền ghi tạm thời của worker vẫn giữ nguyên. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
+3. Chạy `prepare`; lệnh này không gọi model. `run` tự kiểm tra điều kiện trước khi gọi AI, vì vậy chỉ chạy `check` riêng khi cần chẩn đoán. `prepare` tạo task/lock và helper dưới `.workflow-local/direct/<task_id>`, packet bên ngoài repo, giữ nguyên trạng thái paused/stopped. Chỉ hỗ trợ repo chính, không dùng một worktree làm repo nguồn. Thêm `.workflow-local/` vào ignore của repo trước khi chuẩn bị.
+4. Chạy `run` đúng một lần cho lần bắt đầu mới. Tối đa hai lượt worker và hai lượt reviewer, chỉ một repair trong cùng tiến trình. Worker Gemini thực hiện (Gemini implement), controller tự chạy gate (controller tests), và OpenAI Codex Luna Max kiểm tra độc lập (Luna Max independent review). Worker chỉ dùng file tools trên file được giao.
 5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
@@ -21,9 +21,9 @@ Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc v
 
 ```powershell
 node scripts/direct.mjs prepare $repo $taskJson $configJson $newOutput
-node scripts/direct.mjs check "$newOutput/prepared.json"
+# Chỉ khi cần chẩn đoán: node scripts/direct.mjs check "$newOutput/prepared.json"
 node scripts/direct.mjs run "$newOutput/prepared.json"
-node scripts/direct.mjs status "$newOutput/prepared.json"
+# Chỉ khi cần xem lại trạng thái: node scripts/direct.mjs status "$newOutput/prepared.json"
 node scripts/direct.mjs verify-product "$newOutput/prepared.json" # Chỉ khi trạng thái PRODUCT_CHECK_WAIT
 # Chỉ sau xác nhận nghiệm thu của Owner:
 node scripts/direct.mjs accept "$newOutput/prepared.json" Owner

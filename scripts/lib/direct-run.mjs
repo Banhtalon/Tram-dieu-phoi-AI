@@ -30,6 +30,7 @@ const requireDirectReviewer = config => {
 export async function prepareDirect(repo, task, config, output) {
   repo = path.resolve(repo); output = path.resolve(output);
   validateControlledTask(task);
+  requireValue((task.execution?.policy ?? task.policy) === 'CONTROLLED_DELEGATION_V1' && task.lane !== 'FAST' && config.mode === 'ASSISTED', 'NEW_ROUTE_RETIRED');
   requireValue(/^TASK-[A-Z0-9_-]+$/i.test(task.task_id), 'INVALID_TASK_ID');
   requireValue(git(repo, 'rev-parse', '--show-toplevel').toLowerCase() === repo.replaceAll('\\', '/').toLowerCase(), 'REPO_ROOT_REQUIRED');
   requireValue(path.dirname(path.resolve(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))).toLowerCase() === repo.toLowerCase(), 'MAIN_CHECKOUT_REQUIRED');

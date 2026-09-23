@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.5 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.6 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -16,6 +16,8 @@ For new work, the default operational route is Direct: Gemini 3.8 Flash High
 implements, the controller runs gates, Luna Max independently reviews, then Owner
 accepts. Existing frozen tasks retain their own version, policy and budgets; the
 V1 schema discriminator used by init is not a request for Owner to choose a lane.
+New tasks do not use Fast Lane, V2, GEMINI_FIRST or LOCAL_AUTO. The historical
+runtime is available only to inspect, reconcile or resume its frozen packets.
 HANDOFF.md is the current entry, linking this specification, the tracked progress
 checklist and the active local packet. Guides and checklists record execution,
 not additional workflow rules. Owner-facing stages are assigned, implementing,
@@ -304,17 +306,10 @@ digest and task/configuration bindings. New tasks can freeze
 execution.review_source_required=true to reject reviews without this source proof.
 Provider result fields cannot override Lead-recorded identities or evidence bindings.
 
-## Machine Fast Lane
-Fast Lane only routes a clean documentation-only candidate; it never replaces the
-Feature flow. The accepted base commit supplies the allowlist and classifier. The
-allowlist contains only `docs/user-guide/**/*.md` and `docs/tutorials/**/*.md`.
-Any changed allowlist, classifier, fixture, `AGENTS.md`, `GEMINI.md`, binary file,
-symlink, executable-mode change or other path goes to Feature flow. A rename checks
-both its old and new paths. Comment-only recognition is not supported.
-Each decision binds the base and head plus hashes of the accepted allowlist and
-classifier. Changed base, head or decision, unavailable accepted base, or an unclean
-checkout invalidates the decision and routes to Feature flow. A candidate cannot
-relax its own controls and receive Fast Lane.
+## Retired Fast Lane
+Fast Lane no longer accepts new work. Its historical rules and source remain at
+commit `fc5c5bc587714244ed71f1da956fb9fc8fd673f0` for audit or recovery of
+a frozen task. Do not reclassify a frozen task or reset its budget.
 
 ## Safety and operational boundaries
 Keep credentials in official account stores; never copy them into task files.
@@ -351,20 +346,9 @@ The code is non-retryable and preserves timeout, exit, model, conversation and b
 evidence fields so a scope finding cannot hide a simultaneous execution failure.
 
 ## Stage boundary
-ASSISTED is the default automation stage; within it, new work uses the Direct
-Gemini → controller gates → Luna route defined above. Lead may use local tools
-and an independent session under the pre-dispatch ASSISTED exception; missing
-capability is WAITING_CAPABILITY.
-The sequential CLI bridge can run explicit supervised pilots while ASSISTED.
-LOCAL_AUTO requires installation, actual account/model probes and a successful
-handoff/repair pilot on Windows. Merely editing a config field is insufficient.
-Activation evidence binds the tested bridge source, account bindings and pilot state.
-The accepted pilot uses both actual subscription providers, a fresh review, a
-reviewer-or-gate repair and final evidence. Before activation, the Lead runs the
- deterministic quota drill against that accepted pilot. The drill exercises the same
-preflight handling: it records `WAITING_QUOTA`, keeps the checkpoint unchanged, and
-requires a fresh safe preflight before work could continue. It does not call a
-provider or prove a provider's live quota-error wording; a later natural quota event
-is additional operational evidence, not an activation prerequisite. The CLI bridge
-documents commands and persisted checkpoints; it does not change these conditions.
-See [CLI operations](CLI_BRIDGE.md) for commands and conservative interruption recovery.
+The current stage is ASSISTED. Within it, new work uses Direct as defined above;
+the pre-dispatch ASSISTED exception applies when Direct is known unsuitable.
+LOCAL_AUTO is retired for new tasks. Its old activation and quota-drill controls
+remain available in the pre-retirement commit for historical inspection. A frozen
+legacy task may be inspected, reconciled or resumed under its original contract;
+no new pilot, legacy run or activation is started from the current entrypoint.

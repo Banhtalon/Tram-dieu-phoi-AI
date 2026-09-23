@@ -1,7 +1,5 @@
-# Shared file handoffs
+# Hồ sơ bàn giao
 
-Các packet local nằm trong `.workflow-local/`: `current-task.json`, `implementer-result.md`, `evidence.json`, `review.json` và `owner-status.md`.
-Danh sách trường và cấu trúc JSON nằm tại [data model](DATA_MODEL.md); vai trò, trạng thái và quyền hạn nằm tại [V10 canonical spec](V10_CANONICAL_SPEC.md).
-Trang này là danh mục file, không bổ sung quy tắc workflow.
+Bắt đầu tại [HANDOFF](../HANDOFF.md), rồi mở [checklist đợt hiện tại](../docs/WORKFLOW_OPERATION_SIMPLIFICATION.md) và packet của tác vụ đang làm. Không dùng hồ sơ hoặc review của tác vụ khác để xác nhận mã hiện tại.
 
-Điểm vào là [HANDOFF](../HANDOFF.md); tiến độ ở [checklist](../docs/WORKFLOW_SIMPLIFICATION.md). Đợt này dùng `.workflow-local/workflow-simplification/` cho contract/hash, implementer-result, evidence, review và báo cáo Owner. Hồ sơ local cần chuyển riêng khi đổi máy; không đưa settings/auth vào hồ sơ.
+Hồ sơ đợt tinh gọn trước nằm ở [checklist lịch sử](../docs/WORKFLOW_SIMPLIFICATION.md) và `.workflow-local/workflow-simplification/`. Packet cục bộ không nằm trong Git; khi đổi máy phải chuyển riêng, không chuyển file đăng nhập hoặc quyền tài khoản.

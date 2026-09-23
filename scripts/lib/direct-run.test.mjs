@@ -119,9 +119,20 @@ test('prepareDirect and checkDirect reject former Gemini reviewer, incorrect Lun
   const task = { schema_version: 'qq.workflow.task.v10.1', task_id: 'TASK-REVIEWER-CHECK', revision: 1, base_sha: git('rev-parse', 'HEAD'), goal: 'validate reviewer', acceptance_criteria: ['reject bad reviewer'],
     gates: [{ id: 'noop', argv: [process.execPath, '-p', '1'], timeout_seconds: 20 }], user_visible: false, risk: 'LOW', complexity: 'SIMPLE', execution: { policy: 'CONTROLLED_DELEGATION_V1' },
     write_paths: ['file.txt'], allowed_paths: ['file.txt'], lane: 'NORMAL', initial_lane: 'NORMAL', initial_risk: 'LOW', product_check: { applicable: false, reason: 'fixture' }, candidate_head: null, contract_sha256: null };
-  const validConfig = { schema_version: 'qq.bridge.v2', billing: 'SUBSCRIPTION_ONLY', mode: 'ASSISTED', timeout_seconds: 30, write_paths: task.write_paths, gate_paths: [],
-    worker: { transport: 'mcp', server: 'antigravity_worker', provider: 'mcp', command: ['python', 'mcp/antigravity_server.py'], model: 'gemini-3.8-flash-high', local_trial: true, local_trial_root: worktrees, skip_permissions: false },
-    reviewer: { provider: 'openai', cli: 'codex', command: ['codex'], model: 'gpt-5.6-luna', effort: 'max' } };
+  const validConfig = JSON.parse((await readFile(new URL('../../.ai-workflow/BRIDGE_CONFIG.direct.example.json', import.meta.url), 'utf8')).replace(/^\uFEFF/, ''));
+  validConfig.write_paths = task.write_paths;
+  validConfig.worker.local_trial_root = worktrees;
+  assert.equal(validConfig.reviewer.model, 'gpt-5.6-luna');
+  assert.equal(validConfig.reviewer.effort, 'max');
+  assert.equal(validConfig.fallback_reviewer, undefined);
+
+  for (const [name, changedTask, changedConfig] of [
+    ['v2', { ...task, execution: { policy: 'CONTROLLED_DELEGATION_V2' } }, validConfig],
+    ['fast', { ...task, lane: 'FAST', initial_lane: 'FAST' }, validConfig],
+    ['local-auto', task, { ...validConfig, mode: 'LOCAL_AUTO' }]
+  ]) {
+    await assert.rejects(prepareDirect(repo, changedTask, changedConfig, path.join(root, `retired-${name}`)), /NEW_ROUTE_RETIRED/);
+  }
 
   const formerGemini = { provider: 'google', cli: 'antigravity', command: ['agy'], model: 'gemini-3.8-flash-high', agent: 'ag-reviewer-011-r1', agent_definition_sha256: 'ef23a4c0616a77d1d5b982c02ea07ec281c00de5d86aaa42523714b0678bdaea' };
 
