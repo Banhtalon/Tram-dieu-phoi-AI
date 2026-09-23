@@ -40,7 +40,7 @@ test('Direct status and completed accept explain ownership without claiming inte
 });
 
 test('one process, at most one repair, close on PASS/block/error and preserve instruction', async () => {
-  for (const status of ['WAITING_FOR_CHECKPOINT', 'REQUEST_CHANGES', 'WAITING_QUOTA', 'throw']) {
+  for (const status of ['WAITING_FOR_CHECKPOINT', 'REQUEST_CHANGES', 'BLOCKED', 'WAITING_QUOTA', 'throw']) {
     const calls = [], worker = {};
     const api = {
       async runHarnessLifecycle(options) { assert.equal(options.worker, worker); calls.push('run'); if (status === 'throw') throw Error('sentinel'); return { status, requested_changes: [{ instruction: 'fix only the target' }] }; },
@@ -96,11 +96,11 @@ test('real preparation/layout + lifecycle fake boundary, missing helper and paus
   const workspace = path.join(worktrees, task.task_id), calls = [];
   const result = op => ({ task_id: task.task_id, status: 'SUCCEEDED', agent_status: 'SUCCESS', exit_code: 0, operation_id: op.id, invocation_kind: op.kind, attempt: op.attempt, rework_count: op.rework_count, conversation_id: 'synthetic-session', requested_model: config.worker.model, observed_model: config.worker.model });
   const worker = { async tools() { return ['antigravity_execute','antigravity_continue','antigravity_result']; },
-    async execute(_task, prompt, op) { assert.match(prompt, /controller runs all tests/); assert.doesNotMatch(prompt, /run the relevant tests/); calls.push('execute'); await writeFile(path.join(workspace, 'old.txt'), 'after\n'); await writeFile(path.join(workspace, 'new.txt'), 'created\n\n'); return result(op); },
+    async execute(_task, prompt, op) { assert.match(prompt, /controller runs all tests/); assert.match(prompt, /Do not invent product behavior or gameplay details/); assert.doesNotMatch(prompt, /run the relevant tests/); calls.push('execute'); await writeFile(path.join(workspace, 'old.txt'), 'after\n'); await writeFile(path.join(workspace, 'new.txt'), 'created\n\n'); return result(op); },
     async continue(_task, prompt, op) { calls.push('continue'); assert.match(prompt, /Do not read\/run gates/); await writeFile(path.join(workspace, 'new.txt'), 'created\n'); return result(op); } };
   let reviews = 0;
   const final = await runBounded({ taskPath: fakePath, packetDir: m.packetDir, config: fakeConfig, worker,
-    reviewerInvoker: async () => { assert.equal(await readFile(settings, 'utf8'), settingsBytes); reviews++; return { code: 0, session_id: `synthetic-review-${reviews}`, observed_models: [config.reviewer.model], result: { verdict: reviews === 1 ? 'NEEDS_FIX' : 'PASS', summary: 'fixture', material_findings: reviews === 1 ? ['check content'] : [], risk_checks_completed: true } }; } });
+    reviewerInvoker: async ({ prompt }) => { assert.equal(await readFile(settings, 'utf8'), settingsBytes); assert.match(prompt, /return BLOCKED for Lead diagnosis rather than spending a worker repair/); assert.match(prompt, /absence of horizontal overflow alone does not prove usable layout/); reviews++; return { code: 0, session_id: `synthetic-review-${reviews}`, observed_models: [config.reviewer.model], result: { verdict: reviews === 1 ? 'NEEDS_FIX' : 'PASS', summary: 'fixture', material_findings: reviews === 1 ? ['check content'] : [], risk_checks_completed: true } }; } });
   assert.equal(final.status, 'WAITING_FOR_CHECKPOINT'); assert.deepEqual(calls, ['execute', 'continue']); assert.equal(reviews, 2);
   assert.equal(await readFile(settings, 'utf8'), settingsBytes);
   const statePath = path.join(m.packetDir, 'state.json');

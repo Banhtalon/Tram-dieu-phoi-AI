@@ -1,5 +1,5 @@
 # QQ AI Workflow v10 — canonical local contract
-Version 10.1.0-rc.6 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
+Version 10.1.0-rc.7 (supporting v10 and v10.1 tasks). This revision intentionally replaces v9 for adopted v10 tasks.
 Scope: one Owner, local personal projects, subscription access. Not a production
 or adversarial agent isolation framework. CLI connection is a separate stage.
 
@@ -107,10 +107,24 @@ model name, and a provider name is not a role.
    the Owner did not request. If no executable gate can distinguish the cases,
    record the manual check and its limit. A frozen task's gates and budget are not
    changed to rescue a failed run; contract changes need the normal new revision.
+   Browser gates wait for the destination to render before checking visibility;
+   a plausible slow render must not be reported as missing content. For a local UI
+   that depends on remote styling or assets, check its readable layout when those
+   resources do not load. A no-overflow assertion alone does not prove layout.
+   Lead views the rendered result at relevant screen sizes before Owner handoff.
+   Product copy must be supported by Owner intent or existing source; do not invent
+   detailed gameplay or other product behavior to fill an introduction page.
 3. Use one writer. Lead works or hands off via shared files and available tools.
 4. Run relevant checks during development. No mandatory full suite for every tiny edit.
 5. At feature completion, commit code, inspect actual diff, run agreed final gates.
 6. Reviewer checks that head. Material issues go directly to implementer.
+   A failed gate is a code repair request only when the reviewer can identify a
+   concrete source defect that explains it. If the gate result conflicts with the
+   source or the cause is uncertain (including when the missing gate source is
+   needed to decide), return BLOCKED for Lead diagnosis; do not spend a Gemini
+   repair on an unverified gate.
+   Lead checks the frozen gate and browser observation without changing the task's
+   budget or silently weakening the gate. Existing revision/recovery rules apply.
 7. Rerun affected checks; refresh final evidence and review for the final head.
 8. Present a local build with 1–3 ordinary user actions for small changes, more when
    needed to cover the behavior. Record Owner acceptance from the Lead chat.

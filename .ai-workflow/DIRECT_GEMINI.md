@@ -19,6 +19,11 @@ Trước `prepare`, Lead chép các mục sau vào ghi chú/checklist chuẩn b�
 - [ ] Phép kiểm tra bắt được một kết quả sai có thể xảy ra; với biểu mẫu, thử đầu vào thiếu/sai khi phù hợp.
 - [ ] Không tự thêm điều kiện đúng từng chữ hoặc dấu câu mà Owner chưa yêu cầu.
 - [ ] Nếu không kiểm tra tự động được, ghi bước kiểm tra tay và giới hạn của nó.
+- [ ] Với nút/trang trong trình duyệt, chờ trang đích và phần tử cần xem hiện xong rồi mới kết luận thiếu; thử trường hợp tải chậm nếu liên quan. Không dùng một lần `isVisible()` ngay sau khi bấm làm bằng chứng duy nhất.
+- [ ] Với giao diện dùng CSS/ảnh từ mạng, xem trang ở kích thước điện thoại và máy tính khi tài nguyên đó không tải; kiểm bố cục dễ đọc, không chỉ kiểm “không tràn ngang”.
+- [ ] Nội dung mô tả hành vi sản phẩm lấy từ yêu cầu Owner hoặc nguồn có sẵn; phần chưa rõ viết chung, không tự thêm luật chơi.
+
+Sau `run`, nếu gate báo lỗi nhưng nguồn có đúng phần bị báo thiếu, Lead đối chiếu ảnh/trình duyệt và mã gate trước khi coi đó là lỗi Gemini. Khi chưa phân biệt được, giữ `BLOCKED` và hồ sơ hiện tại; không gửi Gemini sửa theo một kết quả kiểm tra chưa xác minh. Trước khi báo Owner nghiệm thu giao diện, Lead xem ảnh thực tế của mã cuối và ghi giới hạn còn lại.
 
 ## Cú pháp PowerShell
 
