@@ -234,7 +234,13 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   const identity={task_id:state.task_id??task?.task_id,revision:state.revision??task?.revision,head:state.head??task?.candidate_head,contract_sha256:state.contract_sha256??task?.contract_sha256};
   const rawEvidence=await regularJson(path.join(packetDir,'evidence.json')),evidence=strictlyBound(rawEvidence,identity)&&typeof rawEvidence.status==='string'&&Array.isArray(rawEvidence.gates)?rawEvidence:null;
   const rawReview=await regularJson(path.join(packetDir,'review.json')),review=strictlyBound(rawReview,identity)&&typeof rawReview.verdict==='string'&&Array.isArray(rawReview.material_findings)?rawReview:null;
-  const productCandidates=[await regularJson(path.join(packetDir,'product_check.json')),await regularJson(path.join(packetDir,'ui_evidence.json')),task?.ui_evidence];
+  const productFiles=await Promise.all(['product_check.json','ui_evidence.json'].map(async name=>{
+    const file=path.join(packetDir,name);
+    try{await lstat(file);}catch(error){return {value:null,invalid:!['ENOENT','ENOTDIR'].includes(error.code)};}
+    try{const value=await regularJson(file);return {value,invalid:value===null};}
+    catch{return {value:null,invalid:true};}
+  }));
+  const productCandidates=[...productFiles.map(file=>file.value),task?.ui_evidence];
   const validProduct=value=>strictlyBound(value,identity)&&value.status==='PASS'&&value.criteria_passed===true&&Array.isArray(value.checks)&&value.checks.length>0&&
     value.checks.every(check=>check?.passed===true&&typeof check.action==='string'&&check.action.trim()&&typeof check.observed==='string'&&check.observed.trim());
   const product=productCandidates.find(validProduct)??null;
@@ -242,7 +248,7 @@ export async function buildReport(packetDir,{audience='owner'}={}){
   let productNotApplicable=false;
   if(!identityConflict&&strictlyBound(task,identity)&&task.schema_version==='qq.workflow.task.v10.1'&&task.user_visible===false&&
       (task.product_checks??task.product_check)?.applicable===false&&
-      !productCandidates.some(value=>value!=null&&!validProduct(value))){
+      !productFiles.some(file=>file.invalid)&&!productCandidates.some(value=>value!=null&&!validProduct(value))){
     try{
       // Legacy v10 does not freeze product_check, so it cannot prove non-applicability.
       const {assertControlledContract}=await import('./controlled-bridge.mjs');

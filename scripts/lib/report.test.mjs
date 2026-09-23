@@ -62,6 +62,13 @@ test('Owner report distinguishes frozen non-applicability, review validity and m
   await write('product_check.json', { ...identity, head: 'c'.repeat(40), status: 'PASS' });
   assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
   await rm(path.join(packet, 'product_check.json'));
+  await writeFile(path.join(packet, 'product_check.json'), '{broken-json');
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await rm(path.join(packet, 'product_check.json'));
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Không áp dụng/);
+  await writeFile(path.join(packet, 'ui_evidence.json'), '{broken-json');
+  assert.match((await buildReport(packet)).owner_summary.product_check, /Chưa xác minh/);
+  await rm(path.join(packet, 'ui_evidence.json'));
   await write('state.json', { ...state, contract_sha256: 'd'.repeat(64) });
   report = await buildReport(packet);
   assert.match(report.owner_summary.product_check, /Chưa xác minh/);
