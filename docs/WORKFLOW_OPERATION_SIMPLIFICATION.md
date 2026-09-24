@@ -47,7 +47,7 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - [x] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
 - [x] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
 - [ ] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
-- [ ] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
+- [x] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
 
 ## Bằng chứng và quyết định
 
@@ -72,5 +72,6 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - Reviewer độc lập đã chỉ ra trường hợp Gemini hoàn thành nhưng hậu kiểm BLOCKED chưa tăng `attempt`, và vị trí ghi checklist trước `prepare` chưa tồn tại. Đã sửa cả hai; test Direct thất bại trước khi sửa và đạt sau khi sửa cho trường hợp đếm lượt, rồi chạy lại Node 105/105, PowerShell 57/57, Python smoke exit 0; `git diff --check` sạch.
 - E6 hotfix: reviewer độc lập PASS trên đúng commit `3a24bd09641b28e1472b2a867f21c1763bf07449` so với `7f4892b`, chạy lại Direct 4/4 và kiểm tra diff sạch. Chưa gọi tài khoản AI thật. Review cũ trên `4affed8` giữ làm bằng chứng lịch sử.
 - Commit mã đã review: `3a24bd09641b28e1472b2a867f21c1763bf07449`.
-- Commit đích sau gộp: chưa có.
-- Trở ngại/người xử lý tiếp: chờ Owner nghiệm thu và cho phép gộp riêng (E8/E9). Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.
+- E9: Owner cho phép gộp riêng ngày 2026-09-24; `main` đã nhận hotfix tại `ebc9caa` rồi Luna 6 Max tại `03db242`; đã xác minh hai commit là tổ tiên của `main` và Git sạch sau gộp.
+- Commit đích sau gộp: `03db2420e215e81ac8ea86986d4f46a1ea709701`.
+- Trở ngại/người xử lý tiếp: E8 còn trống vì chưa có lời nghiệm thu riêng cho toàn bộ checklist tinh gọn vận hành. Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.
