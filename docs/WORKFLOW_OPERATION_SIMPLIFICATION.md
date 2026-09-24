@@ -75,4 +75,5 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - E9: Owner cho phép gộp riêng ngày 2026-09-24; `main` đã nhận hotfix tại `ebc9caa` rồi Luna 6 Max tại `03db242`; đã xác minh hai commit là tổ tiên của `main` và Git sạch sau gộp.
 - Commit đích sau gộp: `03db2420e215e81ac8ea86986d4f46a1ea709701`.
 - E8: Owner nói “nghiệm thu riêng toàn bộ đợt tinh gọn vận hành” ngày 2026-09-24, sau khi đã kiểm tra hotfix trên bài thử game 5. Đây là nghiệm thu đợt tinh gọn vận hành; checklist hotfix phối hợp gate/Gemini có mục nghiệm thu riêng.
+- Hotfix phối hợp gate/Gemini: Owner nghiệm thu riêng ngày 2026-09-24. Bài thử game 2 được nghiệm thu trên bản khôi phục `aba503c`; hồ sơ Direct gốc vẫn giữ nguyên trạng thái chờ kiểm tra sản phẩm.
 - Trạng thái: E8/E9 đã hoàn tất. Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; giữ lại để đối chiếu, không dọn worktree.
