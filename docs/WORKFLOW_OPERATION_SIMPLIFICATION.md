@@ -46,7 +46,7 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - [x] E5. Direct giữ giới hạn 256 KiB, bảo vệ bí mật, ngân sách, review độc lập và bước nghiệm thu.
 - [x] E6. Reviewer độc lập PASS trên đúng commit mã cuối; nếu sửa mã sau đó, kiểm tra và review lại.
 - [x] E7. Lead báo Owner phần bỏ, phần phải giữ, kết quả và phần chưa chạy tài khoản thật.
-- [ ] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
+- [x] E8. Owner nghiệm thu theo lời xác nhận rõ ràng.
 - [x] E9. Owner cho phép gộp riêng; sau khi gộp, xác minh commit đích và Git sạch.
 
 ## Bằng chứng và quyết định
@@ -74,4 +74,5 @@ Nguồn quy tắc: [V10 canonical](../.ai-workflow/V10_CANONICAL_SPEC.md). Đây
 - Commit mã đã review: `3a24bd09641b28e1472b2a867f21c1763bf07449`.
 - E9: Owner cho phép gộp riêng ngày 2026-09-24; `main` đã nhận hotfix tại `ebc9caa` rồi Luna 6 Max tại `03db242`; đã xác minh hai commit là tổ tiên của `main` và Git sạch sau gộp.
 - Commit đích sau gộp: `03db2420e215e81ac8ea86986d4f46a1ea709701`.
-- Trở ngại/người xử lý tiếp: E8 còn trống vì chưa có lời nghiệm thu riêng cho toàn bộ checklist tinh gọn vận hành. Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; cần giữ hoặc chuyển riêng trước khi dọn worktree.
+- E8: Owner nói “nghiệm thu riêng toàn bộ đợt tinh gọn vận hành” ngày 2026-09-24, sau khi đã kiểm tra hotfix trên bài thử game 5. Đây là nghiệm thu đợt tinh gọn vận hành; checklist hotfix phối hợp gate/Gemini có mục nghiệm thu riêng.
+- Trạng thái: E8/E9 đã hoàn tất. Packet `.workflow-local/workflow-operation-simplification/` bị Git ignore; giữ lại để đối chiếu, không dọn worktree.
