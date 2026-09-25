@@ -164,7 +164,7 @@ function lifecycleConfig(config = {}) {
   const lifecycle = config.lifecycle ?? {};
   const timeoutSeconds = asPositiveInteger(config.timeout_seconds, DEFAULT_LEASE_SECONDS, 'timeout_seconds');
   const maxRework = lifecycle.max_rework ?? DEFAULT_MAX_REWORK;
-  if (!Number.isInteger(maxRework) || maxRework < 1 || maxRework > 3) throw fail('INVALID_CONFIG', 'lifecycle.max_rework must be between 1 and 3');
+  if (!Number.isInteger(maxRework) || maxRework < 1 || maxRework > 4) throw fail('INVALID_CONFIG', 'lifecycle.max_rework must be between 1 and 4');
   if (typeof lifecycle.worktree_root !== 'undefined' && (typeof lifecycle.worktree_root !== 'string' || path.isAbsolute(lifecycle.worktree_root) || !isWithin('.', lifecycle.worktree_root))) throw fail('INVALID_CONFIG', 'lifecycle.worktree_root must be a relative path inside the project');
   if (typeof lifecycle.desired_state_path !== 'undefined' && typeof lifecycle.desired_state_path !== 'string') throw fail('INVALID_CONFIG', 'lifecycle.desired_state_path must be a path inside the project');
   return {

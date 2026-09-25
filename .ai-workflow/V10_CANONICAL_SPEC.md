@@ -246,9 +246,10 @@ exhaustion with unresolved issues stops with BLOCKED_TECHNICAL.
 The shipped new-task template and `workflow.mjs init` use `CONTROLLED_DELEGATION_V1`.
 For Owner-authorized direct local work, the Lead uses `scripts/direct.mjs` with the
 existing task/config contract and MCP lifecycle, without a Luna task as a CLI runner.
-This entrypoint has a stricter per-task budget: one worker execution, at most one
-same-process repair and two independent reviews. It stops on failures or exhausted
-budget; a new task/revision does not authorize another attempt. Worker file scope is
+This entrypoint has a bounded per-task budget for newly prepared tasks: one worker
+execution, at most three same-process repairs and four independent reviews. Previously
+frozen Direct tasks retain their one-repair, two-review budget. It stops on failures or
+exhausted budget; a new task/revision does not authorize another attempt. Worker file scope is
 exact; the controller runs gates, and the worker must not run shell/gates or access
 control files. The direct workflow requires a Gemini 3.8 Flash High MCP worker to
 implement, controller-run gates to test, an independent OpenAI Codex model gpt-6-luna

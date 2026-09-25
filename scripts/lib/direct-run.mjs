@@ -84,7 +84,7 @@ export async function prepareDirect(repo, task, config, output) {
   requireValue(!config.test_mode && config.worker?.local_trial === true, 'LOCAL_TRIAL_REQUIRED');
   requireValue(config.worker.skip_permissions !== true && config.billing === 'SUBSCRIPTION_ONLY', 'UNSAFE_CONFIG');
   requireDirectReviewer(config);
-  config.lifecycle = { ...config.lifecycle, max_rework: 2, checkpoint_required: true, control_root: output,
+  config.lifecycle = { ...config.lifecycle, max_rework: 4, checkpoint_required: true, control_root: output,
     desired_state_path: '.workflow-local/ai-control.desired_state', lease_seconds: Math.min(3600, (config.timeout_seconds ?? 300) * 4 + 120) };
   assertWorkerIsolation(config, { repoRoot: repo, controlRoot: output });
   const root = path.join(repo, '.workflow-local', 'direct', task.task_id);
@@ -128,7 +128,7 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
   await assertControlledContract(m.taskPath, task);
   requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
   requireDirectReviewer(config, { allowLegacy: true });
-  requireValue(config.lifecycle.max_rework === 2 && config.lifecycle.checkpoint_required === true && !config.fallback_reviewer, 'BUDGET_MISMATCH');
+  requireValue([2, 4].includes(config.lifecycle.max_rework) && config.lifecycle.checkpoint_required === true && !config.fallback_reviewer, 'BUDGET_MISMATCH');
   requireValue(config.worker.local_trial === true && !config.test_mode && !config.worker.skip_permissions, 'UNSAFE_CONFIG');
   assertWorkerIsolation(config, { repoRoot: m.repo, controlRoot: path.dirname(manifestPath) });
   requireValue((await lifecycle.readDesiredState(m.repo, config)).state === 'running', 'DESIRED_STATE_BLOCKED');
@@ -154,12 +154,14 @@ export async function checkDirect(manifestPath, { allowExisting = false } = {}) 
 
 export async function runBounded(options, api = lifecycle) {
   try {
-    const first = await api.runHarnessLifecycle(options);
-    if (first.status !== 'REQUEST_CHANGES') return first;
-    const instruction = first.requested_changes?.at(-1)?.instruction;
-    requireValue(typeof instruction === 'string' && instruction.length > 0, 'REPAIR_INSTRUCTION_MISSING');
-    return await api.continueHarnessLifecycle({ ...options, instruction:
-      `Use only file tools on the frozen allowed paths. Do not read/run gates, shell or control files; the controller runs tests.\n${instruction}` });
+    let state = await api.runHarnessLifecycle(options);
+    for (let repair = 1; repair < options.config.lifecycle.max_rework && state.status === 'REQUEST_CHANGES'; repair++) {
+      const instruction = state.requested_changes?.at(-1)?.instruction;
+      requireValue(typeof instruction === 'string' && instruction.length > 0, 'REPAIR_INSTRUCTION_MISSING');
+      state = await api.continueHarnessLifecycle({ ...options, instruction:
+        `Use only file tools on the frozen allowed paths. Do not read/run gates, shell or control files; the controller runs tests.\n${instruction}` });
+    }
+    return state;
   } finally { await api.closeLifecycleWorkers(); }
 }
 

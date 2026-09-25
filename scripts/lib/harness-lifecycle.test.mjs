@@ -675,6 +675,27 @@ test('max rework is enforced and does not loop', async t => {
   assert.deepEqual(JSON.parse(await readFile(f.settingsPath, 'utf8')).permissions.allow, []);
 });
 
+test('four review change requests permit exactly three completed repairs', async t => {
+  const f = await fixture({ maxRework: 4, reviewerVerdicts: ['NEEDS_FIX'] });
+  t.after(f.cleanup);
+  const originalContinue = f.worker.continue;
+  f.worker.continue = async (task, instruction, operation) => {
+    const result = await originalContinue.call(f.worker, task, instruction, operation);
+    await writeFile(path.join(f.workspace, 'test_demo.py'), `assert True\n# repair ${operation.attempt}\n`);
+    return result;
+  };
+  let result = await runHarnessLifecycle(f.options);
+  assert.equal(result.status, 'REQUEST_CHANGES');
+  for (let repair = 1; repair <= 3; repair++) {
+    result = await continueHarnessLifecycle({ ...f.options, instruction: result.requested_changes.at(-1).instruction });
+    assert.equal(result.status, repair === 3 ? 'RETRY_EXHAUSTED' : 'REQUEST_CHANGES');
+    assert.equal(result.attempt, repair + 1);
+  }
+  assert.equal(result.rework_count, 4);
+  assert.equal(f.reviewerCalls.length, 4);
+  assert.equal(f.worker.calls.length, 4);
+});
+
 test('lost lease prevents continue without calling MCP', async t => {
   const f = await fixture();
   t.after(f.cleanup);

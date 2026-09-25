@@ -41,17 +41,18 @@ test('Direct status and completed accept explain ownership without claiming inte
   assert.equal(blockedAfterWorker.repairs, 1);
 });
 
-test('one process, at most one repair, close on PASS/block/error and preserve instruction', async () => {
-  for (const status of ['WAITING_FOR_CHECKPOINT', 'REQUEST_CHANGES', 'BLOCKED', 'WAITING_QUOTA', 'throw']) {
+test('one process, at most three repairs for new tasks and one for frozen legacy tasks', async () => {
+  for (const [status, maxRework] of [['WAITING_FOR_CHECKPOINT', 4], ['REQUEST_CHANGES', 4], ['REQUEST_CHANGES', 2], ['BLOCKED', 4], ['WAITING_QUOTA', 4], ['throw', 4]]) {
     const calls = [], worker = {};
     const api = {
       async runHarnessLifecycle(options) { assert.equal(options.worker, worker); calls.push('run'); if (status === 'throw') throw Error('sentinel'); return { status, requested_changes: [{ instruction: 'fix only the target' }] }; },
-      async continueHarnessLifecycle(options) { assert.equal(options.worker, worker); assert.match(options.instruction, /fix only the target/); calls.push('continue'); return { status: 'REQUEST_CHANGES' }; },
+      async continueHarnessLifecycle(options) { assert.equal(options.worker, worker); assert.match(options.instruction, /fix only the target/); calls.push('continue'); return { status: 'REQUEST_CHANGES', requested_changes: [{ instruction: 'fix only the target' }] }; },
       async closeLifecycleWorkers() { calls.push('close'); }
     };
-    if (status === 'throw') await assert.rejects(runBounded({ worker }, api), /sentinel/);
-    else await runBounded({ worker }, api);
-    assert.deepEqual(calls, status === 'REQUEST_CHANGES' ? ['run', 'continue', 'close'] : ['run', 'close']);
+    const options = { worker, config: { lifecycle: { max_rework: maxRework } } };
+    if (status === 'throw') await assert.rejects(runBounded(options, api), /sentinel/);
+    else await runBounded(options, api);
+    assert.deepEqual(calls, status === 'REQUEST_CHANGES' ? ['run', ...Array(maxRework - 1).fill('continue'), 'close'] : ['run', 'close']);
   }
 });
 
@@ -79,6 +80,7 @@ test('real preparation/layout + lifecycle fake boundary, missing helper and paus
   await assert.rejects(checkDirect(manifest), /DESIRED_STATE_BLOCKED/);
   await writeFile(control, 'running\n');
   const preparedConfig = JSON.parse(await readFile(m.configPath));
+  assert.equal(preparedConfig.lifecycle.max_rework, 4);
   const helper = preparedConfig.worker.command[1], originalHelper = await readFile(helper);
   await writeFile(helper, 'wrong helper');
   await assert.rejects(checkDirect(manifest), /HELPER_CHANGED/);
