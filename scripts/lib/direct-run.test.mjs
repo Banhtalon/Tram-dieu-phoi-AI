@@ -6,9 +6,33 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect, statusDirect, acceptDirect } from './direct-run.mjs';
+import { prepareDirect, checkDirect, runBounded, runDirect, verifyProductDirect, statusDirect, acceptDirect, summarizeDirectUsage } from './direct-run.mjs';
 import * as lifecycle from './harness-lifecycle.mjs';
 import { freezeControlledTask } from './controlled-bridge.mjs';
+import { normalizeUsage } from './receipts.mjs';
+
+test('Direct usage report preserves provider counters and leaves missing counters null', () => {
+  const report = summarizeDirectUsage({
+    latest_execution: {
+      observed_model: 'gemini-3.8-flash-high',
+      usage: { source: 'mcp', input_tokens: 11, output_tokens: 7, reasoning_tokens: null, cached_tokens: null, total_tokens: 18 }
+    },
+    review_result: {
+      observed_models: ['gpt-6-luna'],
+      usage: { source: 'openai', input_tokens: 5, output_tokens: 3, reasoning_tokens: null, cached_tokens: null, total_tokens: 8 }
+    }
+  }, { worker: { provider: 'mcp', model: 'gemini-3.8-flash-high' }, reviewer: { provider: 'openai', model: 'gpt-6-luna' } });
+  assert.equal(report.worker_usage.total_tokens, 18);
+  assert.equal(report.reviewer_usage.total_tokens, 8);
+  assert.equal(report.usage.total_tokens, 26);
+  assert.equal(report.usage.input_tokens, 16);
+  assert.equal(report.usage.output_tokens, 10);
+  const unavailable = summarizeDirectUsage({ latest_execution: { usage: null } }, { worker: { provider: 'mcp', model: 'gemini-3.8-flash-high' }, reviewer: {} });
+  assert.equal(unavailable.usage.total_tokens, null);
+  assert.equal(unavailable.reviewer_usage, null);
+  assert.equal(normalizeUsage({ input_tokens: -1, output_tokens: 4, total_tokens: -2 }, 'fixture').input_tokens, null);
+  assert.equal(normalizeUsage({ input_tokens: 1, output_tokens: 4, total_tokens: -2 }, 'fixture').total_tokens, 5);
+});
 
 test('Direct status and completed accept explain ownership without claiming integration', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'direct-owner-message-'));

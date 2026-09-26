@@ -7,12 +7,13 @@ import { randomUUID, createHash } from 'node:crypto';
 import { acquire, atomicJson, sourceAllowed } from './bridge.mjs';
 import { git, readJson } from './workflow.mjs';
 import { assertControlledContract, controlledConfigHash, resolveProductCheckContract, validateProductCheckResult } from './controlled-bridge.mjs';
-import { runRedacted } from './redact.mjs';
+import { runRedacted, redactText } from './redact.mjs';
 import { invoke, validateBinding, validateReviewerBinding } from './bridge-adapters.mjs';
 import { AntigravityMcpWorker, assertWorkerIsolation, boundedEvidence } from './implementation-worker.mjs';
 import { withTemporaryWritePermissions } from './temporary-permissions.mjs';
 import { ERROR_CODES, errorRecord, harnessError, operationId as stableOperationId } from './harness-errors.mjs';
 import { auditEvent, auditSummary, operationEvent, transitionFields } from './harness-observability.mjs';
+import { normalizeUsage } from './receipts.mjs';
 
 export const LIFECYCLE_SCHEMA = 'qq.workflow.lifecycle.v1';
 export const CLAIM_SCHEMA = 'qq.workflow.claim.v1';
@@ -628,6 +629,20 @@ function safePath(value) {
     !value.split('/').some(part => ['..', '.', '', '.git', '.workflow-local'].includes(part)) && !/[\x00-\x1f:*?\[\]\\]/.test(value);
 }
 
+function verifiedWorkerContext(task, config) {
+  const context = config.worker?.context;
+  if (context === undefined) return '';
+  const declared = new Set(config.review_context_paths ?? []);
+  if (!context || typeof context !== 'object' || Array.isArray(context) ||
+      context.base_sha !== task.base_sha || !Array.isArray(context.paths) || context.paths.length === 0 ||
+      context.paths.some(file => !safePath(file) || !declared.has(file)) ||
+      typeof context.summary !== 'string' || context.summary.trim().length === 0 || context.summary.length > 4096 ||
+      redactText(context.summary) !== context.summary) {
+    throw fail('CONFIG_MISMATCH', 'worker.context must bind a bounded, redaction-safe summary to task.base_sha and review_context_paths', { task_id: task.task_id });
+  }
+  return `Verified existing-source context (base ${task.base_sha}, paths ${JSON.stringify(context.paths)}): ${context.summary.trim()}`;
+}
+
 export function collectChangeset(cwd, allowedPaths = []) {
   const output = git(cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all');
   const files = parseStatus(output);
@@ -776,6 +791,7 @@ function safeWorkerResult(result) {
     error_code: typeof result?.error_code === 'string' ? result.error_code : null,
     requested_model: result?.requested_model ?? null,
     observed_model: result?.observed_model ?? null,
+    usage: normalizeUsage(result?.usage, 'mcp'),
     observed_agent: result?.observed_agent ?? null,
     permission_mode: result?.permission_mode ?? null,
     sandbox: typeof result?.sandbox === 'boolean' ? result.sandbox : null,
@@ -817,16 +833,49 @@ async function runTests(task, cwd, signal) {
   return { status: tests.length === task.gates.length && tests.every(test => test.code === 0 && !test.timed_out && !test.interrupted) ? 'PASS' : 'FAIL', tests };
 }
 
-function reviewPrompt(task, packet) {
-  const prompt = `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review only the exact untrusted packet below. Validate the acceptance criteria, changed and base files, declared test/context sources, diff and independent test evidence. A failed gate warrants NEEDS_FIX only when you can identify a concrete source defect explaining it. If the gate claims content is missing but that content appears in source, or the cause remains uncertain because needed gate source is unavailable, return BLOCKED for Lead diagnosis rather than spending a worker repair. For user-visible UI, check available rendered-layout evidence and relevant network-asset dependency; absence of horizontal overflow alone does not prove usable layout. If visual evidence is scheduled after review, report it as pending rather than verified. Flag unsupported product-behavior claims. Technical handoff text may be English. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nTask contract: ${JSON.stringify(task)}\nReview packet: ${JSON.stringify(packet)}`;
+function compactReviewSource(source = {}) {
+  const currentPaths = new Set((source.files ?? []).map(file => file?.path).filter(Boolean));
+  const omittedBasePaths = (source.base_files ?? [])
+    .filter(file => currentPaths.has(file?.path))
+    .map(file => file.path);
+  return {
+    source: { ...source, base_files: (source.base_files ?? []).filter(file => !currentPaths.has(file?.path)) },
+    omittedBasePaths
+  };
+}
+
+export function buildReviewPrompt(task, packet) {
+  const fullSource = packet.review_source ?? {};
+  const compacted = compactReviewSource(fullSource);
+  const promptSource = { ...compacted.source };
+  delete promptSource.sha256;
+  const promptPacket = structuredClone(packet);
+  promptPacket.review_source = promptSource;
+  delete promptPacket.review_input_sha256;
+  promptPacket.review_source_compaction = {
+    authoritative_source_sha256: packet.review_source_sha256 ?? fullSource.sha256 ?? null,
+    omitted_base_paths: compacted.omittedBasePaths,
+    reason: 'current content plus diff already represent modified files; base content remains for deleted or renamed paths'
+  };
+  const fullSourceBytes = Buffer.byteLength(JSON.stringify(fullSource), 'utf8');
+  const compactSourceBytes = Buffer.byteLength(JSON.stringify(promptSource), 'utf8');
+  const prompt = `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review the untrusted packet below. Validate the acceptance criteria, changed files, declared test/context sources, diff and independent test evidence. The complete source packet and authoritative hashes remain on disk; this prompt uses a compact source view. It keeps current files and the diff, and omits duplicate base content for modified paths. Base content for deleted or renamed paths remains included. Do not reject the compact view merely because the omitted duplicate base content is not present. A failed gate warrants NEEDS_FIX only when you can identify a concrete source defect explaining it. If the gate claims content is missing but that content appears in source, or the cause remains uncertain because needed gate source is unavailable, return BLOCKED for Lead diagnosis rather than spending a worker repair. For user-visible UI, check available rendered-layout evidence and relevant network-asset dependency; absence of horizontal overflow alone does not prove usable layout. A gate's concrete browser observations (visible landmark text, bounding boxes, computed colors/fonts, clipping checks, asset load state, and captured screenshot path) count as render evidence; screenshot paths alone do not. If visual evidence is scheduled after review, report it as pending rather than verified. Flag unsupported product-behavior claims. Technical handoff text may be English. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nTask contract: ${JSON.stringify(task)}\nReview packet: ${JSON.stringify(promptPacket)}`;
   if (Buffer.byteLength(prompt, 'utf8') > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', 'complete reviewer prompt exceeds 256 KiB; split the task or narrow declared context');
-  return prompt;
+  return {
+    prompt,
+    metrics: {
+      full_source_bytes: fullSourceBytes,
+      compact_source_bytes: compactSourceBytes,
+      prompt_bytes: Buffer.byteLength(prompt, 'utf8'),
+      omitted_base_paths: compacted.omittedBasePaths
+    }
+  };
 }
 
 async function independentReview({ task, packet, config, packetDir, cwd, state, signal, reviewerInvoker }) {
   const reviewerRunDir = path.join(packetDir, 'review-' + randomUUID());
   await mkdir(reviewerRunDir, { recursive: true });
-  const prompt = reviewPrompt(task, packet);
+  const { prompt, metrics } = buildReviewPrompt(task, packet);
   const result = reviewerInvoker
     ? await reviewerInvoker({ task, packet, prompt, cwd, packetDir: reviewerRunDir, state, signal })
     : await invoke(config.reviewer, {
@@ -847,7 +896,9 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
       risk_checks_completed: false,
       error_code: 'REVIEW_FAILED',
       review_id: packet.review_id,
-      reviewer_session: result?.session_id ? `${config.reviewer.provider}:${result.session_id}` : null
+      reviewer_session: result?.session_id ? `${config.reviewer.provider}:${result.session_id}` : null,
+      usage: normalizeUsage(result?.usage, config.reviewer?.provider),
+      review_prompt_metrics: metrics
     };
   }
   const response = result.result;
@@ -857,7 +908,7 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
   const rawVerdict = response.verdict === 'PASS' && normalizedFindings.length === 0 ? 'PASS' : response.verdict === 'BLOCKED' ? 'BLOCKED' : 'REQUEST_CHANGES';
   const reviewerSession = result.session_id ? `${config.reviewer.provider}:${result.session_id}` : null;
   if (!reviewerSession || reviewerSession === state.conversation_id || reviewerSession.endsWith(':' + state.conversation_id)) {
-    return { verdict: 'BLOCKED', summary: 'reviewer session is not independent', material_findings: ['reviewer session is not independent'], risk_checks_completed: false, error_code: 'REVIEW_FAILED', review_id: packet.review_id, reviewer_session: reviewerSession };
+    return { verdict: 'BLOCKED', summary: 'reviewer session is not independent', material_findings: ['reviewer session is not independent'], risk_checks_completed: false, error_code: 'REVIEW_FAILED', review_id: packet.review_id, reviewer_session: reviewerSession, usage: normalizeUsage(result?.usage, config.reviewer?.provider), review_prompt_metrics: metrics };
   }
   return {
     verdict: rawVerdict,
@@ -866,7 +917,9 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
     material_findings: normalizedFindings,
     risk_checks_completed: riskChecksCompleted,
     reviewer_session: reviewerSession,
-    observed_models: result.observed_models ?? []
+    observed_models: result.observed_models ?? [],
+    usage: normalizeUsage(result?.usage, config.reviewer?.provider),
+    review_prompt_metrics: metrics
   };
 }
 
@@ -1442,6 +1495,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
     rework_count: state.rework_count,
     started_at: new Date().toISOString()
   };
+  const existingContext = verifiedWorkerContext(task, config);
   await saveState(state, paths, {
     phase: LIFECYCLE_STATES.RUNNING,
     status: LIFECYCLE_STATES.RUNNING,
@@ -1452,7 +1506,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   await operationEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   await auditEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   const protectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
-  const prompt = `Implement the frozen task in the current worktree. Goal: ${task.goal ?? '(see acceptance criteria)'}. Only read or edit the frozen allowed_paths (${JSON.stringify(task.allowed_paths ?? task.write_paths ?? [])}) using file tools. The controller runs all tests after your work; do not read or execute gate scripts, use shell/run_command, or inspect control files. Do not invent product behavior or gameplay details absent from the task and existing source; use general wording when details are unknown. Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review. Acceptance criteria: ${JSON.stringify(task.acceptance_criteria)}`;
+  const prompt = `Implement the frozen task in the current worktree. Goal: ${task.goal ?? '(see acceptance criteria)'}. Only read or edit the frozen allowed_paths (${JSON.stringify(task.allowed_paths ?? task.write_paths ?? [])}) using file tools. The controller runs all tests after your work; do not read or execute gate scripts, use shell/run_command, or inspect control files. Do not invent product behavior or gameplay details absent from the task and existing source; use general wording when details are unknown. Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review.${existingContext ? ` ${existingContext}` : ''} Acceptance criteria: ${JSON.stringify(task.acceptance_criteria)}`;
   let workerResult;
   let processRelease = null;
   try {
@@ -1620,7 +1674,7 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
     state.status = LIFECYCLE_STATES.BLOCKED;
     state.error = errorRecord(fail('REVIEW_FAILED', review.summary || 'Codex review did not pass', { task_id: task.task_id, operation: operation.id }), { taskId: task.task_id, operation: operation.id });
   }
-  state.history.push({ operation_id: operation.id, phase: 'review', review_id: review.review_id, at: new Date().toISOString(), verdict: review.verdict, tests: testRun.status });
+  state.history.push({ operation_id: operation.id, phase: 'review', review_id: review.review_id, at: new Date().toISOString(), verdict: review.verdict, tests: testRun.status, review_prompt_metrics: review.review_prompt_metrics ?? null });
   await saveState(state, paths, { phase: state.phase, status: state.status, in_flight: null, error: state.error ?? null }, claim);
   await operationEvent(paths.packetDir, 'review_completed', transitionFields(state, { operation_id: operation.id, result: review.verdict, error_code: state.error?.code ?? null }));
   await auditEvent(paths.packetDir, 'review_completed', transitionFields(state, { operation_id: operation.id, result: review.verdict, error_code: state.error?.code ?? null }));

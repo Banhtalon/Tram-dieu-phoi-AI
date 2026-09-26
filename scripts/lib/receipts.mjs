@@ -11,7 +11,7 @@ const canonical=value=>JSON.stringify(safe(value));
 export function promptHash(prompt){return sha256(prompt??'');}
 export function normalizeUsage(usage,provider){
   if(!usage||typeof usage!=='object')return {source:'unavailable',input_tokens:null,output_tokens:null,reasoning_tokens:null,cached_tokens:null,total_tokens:null};
-  const pick=(value,...keys)=>{for(const key of keys)if(Number.isFinite(value?.[key]))return value[key];return null;};
+  const pick=(value,...keys)=>{for(const key of keys)if(Number.isFinite(value?.[key])&&value[key]>=0)return value[key];return null;};
   const tokens=usage.tokens&&typeof usage.tokens==='object'?usage.tokens:null;
   const modelTokens=usage.models&&typeof usage.models==='object'?Object.values(usage.models).map(model=>model?.tokens&&typeof model.tokens==='object'?model.tokens:null):[];
   const sumModels=keys=>{if(!modelTokens.length)return null;let total=0;for(const value of modelTokens){const counter=pick(value,...keys);if(counter===null)return null;total+=counter;}return total;};

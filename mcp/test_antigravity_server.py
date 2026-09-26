@@ -22,7 +22,7 @@ FAKE_OUTPUT = (
     '@echo off\r\n'
     'echo {"event":"init","conversation_id":"smoke-conversation","init":{"model":"fake-antigravity","agent":"fake-agent"}}\r\n'
     'echo {"event":"step_update","step_update":{"conversation_id":"smoke-conversation","step_type":"agent_response","text_delta":"smoke ok"}}\r\n'
-    'echo {"event":"result","result":{"conversation_id":"smoke-conversation","status":"SUCCESS","response":"smoke ok"}}\r\n'
+    'echo {"event":"result","result":{"conversation_id":"smoke-conversation","status":"SUCCESS","response":"smoke ok","usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}\r\n'
 )
 
 TRIAL_MODEL = "gemini-3.8-flash-high"
@@ -362,6 +362,7 @@ async def smoke() -> None:
             first = await SERVER.antigravity_execute("TASK-SMOKE", "op-execute", "edit a test file", "execute", 1, 0)
             assert first["status"] == "SUCCEEDED"
             assert first["operation_id"] == "op-execute"
+            assert first["usage"]["total_tokens"] == 17
             continued = await SERVER.antigravity_continue("TASK-SMOKE", "op-continue", "run the test again", "continue", 2, 1)
             assert continued["status"] == "SUCCEEDED"
             assert continued["operation_id"] == "op-continue"

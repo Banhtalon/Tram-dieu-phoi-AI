@@ -12,6 +12,7 @@ import { assertSubscriptionSettings, validateReviewerBinding } from './bridge-ad
 import { assertWorkerIsolation } from './implementation-worker.mjs';
 import { auditSummary } from './harness-observability.mjs';
 import { runRedacted } from './redact.mjs';
+import { aggregateInvocations } from './report.mjs';
 
 const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
 const json = async file => JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
@@ -26,6 +27,28 @@ const completedAttempts = state => {
   return recorded === null && verified === null ? null : Math.max(recorded ?? 0, verified ?? 0);
 };
 const completedRepairs = state => { const attempts = completedAttempts(state); return attempts === null ? null : Math.max(0, attempts - 1); };
+export function summarizeDirectUsage(state, config) {
+  const items = [];
+  if (state?.latest_execution) items.push({
+    role: 'worker',
+    provider: config.worker?.provider ?? 'unavailable',
+    requested_model: config.worker?.model ?? 'unavailable',
+    observed_models: state.latest_execution.observed_model ? [state.latest_execution.observed_model] : [],
+    usage: state.latest_execution.usage ?? null
+  });
+  if (state?.review_result) items.push({
+    role: 'reviewer',
+    provider: config.reviewer?.provider ?? 'unavailable',
+    requested_model: config.reviewer?.model ?? 'unavailable',
+    observed_models: state.review_result.observed_models ?? [],
+    usage: state.review_result.usage ?? null
+  });
+  return {
+    worker_usage: state?.latest_execution?.usage ?? null,
+    reviewer_usage: state?.review_result?.usage ?? null,
+    usage: aggregateInvocations(items, true).usage
+  };
+}
 const inside = (root, file) => { const rel = path.relative(root, file); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
 const errorCode = error => /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code ?? '') ? error.code : 'DIRECT_RUN_FAILED';
 const requireDirectReviewer = (config, { allowLegacy = false } = {}) => {
@@ -201,6 +224,11 @@ export async function runDirect(manifestPath, signal) {
           report.worker_session = saved.conversation_id ?? null;
           report.reviewer_session = saved.review_result?.reviewer_session ?? null;
           report.reviewer_models = saved.review_result?.observed_models ?? [];
+          Object.assign(report, summarizeDirectUsage(saved, config));
+          const reviewMetrics = Array.isArray(saved.history)
+            ? saved.history.filter(item => item.phase === 'review' && item.review_prompt_metrics).map(item => item.review_prompt_metrics)
+            : [];
+          report.review_prompt_metrics = reviewMetrics.length > 0 ? reviewMetrics : (saved.review_result?.review_prompt_metrics ? [saved.review_result.review_prompt_metrics] : []);
           report.changed_files = saved.changed_files?.map(file => file.path) ?? [];
           report.gates = saved.tests?.map(test => ({ id: test.id, code: test.code, timed_out: test.timed_out })) ?? [];
           const audit = await auditSummary(m.packetDir);

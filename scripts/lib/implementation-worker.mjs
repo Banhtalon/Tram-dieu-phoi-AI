@@ -4,6 +4,7 @@ import { McpClient } from './mcp-client.mjs';
 import { subscriptionEnv } from './bridge-process.mjs';
 import { redactText } from './redact.mjs';
 import { harnessError } from './harness-errors.mjs';
+import { normalizeUsage } from './receipts.mjs';
 
 const REQUIRED_TOOLS = Object.freeze(['antigravity_execute', 'antigravity_continue', 'antigravity_result']);
 const TRIAL_MODEL = 'gemini-3.8-flash-high';
@@ -272,6 +273,7 @@ export class AntigravityMcpWorker extends ImplementationWorker {
       attempt: Number.isInteger(result.attempt) ? result.attempt : null,
       rework_count: Number.isInteger(result.rework_count) ? result.rework_count : null,
       conversation_id: result.conversation_id ?? null,
+      usage: normalizeUsage(result.usage, 'mcp'),
       requested_model: typeof result.requested_model === 'string' ? result.requested_model : null,
       observed_model: typeof result.observed_model === 'string' ? result.observed_model : null,
       observed_agent: typeof result.observed_agent === 'string' ? result.observed_agent : null,

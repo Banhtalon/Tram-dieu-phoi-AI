@@ -564,6 +564,13 @@ async def _execute(task_id: str, operation_id: str, invocation_kind: str, attemp
     scope_violation = _view_file_scope_violation(events, workspace)
     evidence_events, evidence_truncated = _bounded_evidence(events)
     terminal = _terminal_result(events)
+    terminal_usage = None
+    if terminal:
+        candidate_usage = terminal.get("usage")
+        if not isinstance(candidate_usage, dict):
+            candidate_usage = terminal.get("stats")
+        if isinstance(candidate_usage, dict):
+            terminal_usage = candidate_usage
     agent_status = terminal.get("status") if terminal and isinstance(terminal.get("status"), str) else None
     protocol_errors = _protocol_errors(events, parse_error, observed_conversation, terminal)
     if scope_violation:
@@ -589,6 +596,7 @@ async def _execute(task_id: str, operation_id: str, invocation_kind: str, attemp
         "timed_out": raw["timed_out"],
         "output_limited": raw["output_limited"],
         "conversation_id": observed_conversation,
+        "usage": terminal_usage,
         "requested_model": requested_model,
         "observed_model": observed_model,
         "observed_agent": observed_agent,

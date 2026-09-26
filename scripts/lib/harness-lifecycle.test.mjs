@@ -30,6 +30,7 @@ import {
   releaseLease,
   verifyProductCheck,
   buildReviewSource,
+  buildReviewPrompt,
   validateLease,
   renewLease
 } from './harness-lifecycle.mjs';
@@ -37,7 +38,7 @@ import {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 let serial = 0;
 
-async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions, productCheck = false } = {}) {
+async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions, productCheck = false, workerContext = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qq-harness-lifecycle-'));
   const productModePath = path.join(root, 'product-mode.txt');
   const productRunnerPath = path.join(root, 'product-runner.mjs');
@@ -134,16 +135,21 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
       files: [path.join(workspace, 'demo.py'), path.join(workspace, 'test_demo.py')]
     };
   }
+  if (workerContext) {
+    config.review_context_paths = ['test_demo.py'];
+    config.worker.context = { base_sha: base, paths: ['test_demo.py'], summary: workerContext };
+  }
   await freezeControlledTask(taskPath, task, bindConfig ? config : null);
   const reviewerCalls = [];
-  const reviewer = async ({ state, packet }) => {
+  const reviewer = async ({ state, packet, prompt }) => {
     if (settingsPath) permissionObservations.push({ phase: 'review', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
     const verdict = reviewerVerdicts[Math.min(reviewerCalls.length, reviewerVerdicts.length - 1)];
-    reviewerCalls.push({ verdict, attempt: state.attempt, packet });
+    reviewerCalls.push({ verdict, attempt: state.attempt, packet, prompt });
     return {
       code: 0,
       session_id: `codex-review-${reviewerCalls.length}`,
       observed_models: ['gpt-5.6-terra'],
+      usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
       result: {
         verdict,
         summary: verdict === 'PASS' ? 'fixture review passed' : 'fixture review requests changes',
@@ -163,15 +169,18 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
     rework_count: operation?.rework_count ?? null,
     conversation_id: 'agy-conversation-1',
     observed_model: 'antigravity',
+    usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18 },
     stderr: ''
   });
   const worker = {
     calls: [],
+    prompts: [],
     resultCalls: 0,
     lastResult: null,
     resultOverride: null,
     async execute(currentTask, prompt, operation) {
       this.calls.push({ tool: 'antigravity_execute', task_id: currentTask.task_id });
+      this.prompts.push(prompt);
       if (settingsPath) permissionObservations.push({ phase: 'execute', allow: JSON.parse(await readFile(settingsPath, 'utf8')).permissions.allow });
       await writeFile(path.join(workspace, 'demo.py'), 'VALUE = "ok"\n');
       await writeFile(path.join(workspace, 'test_demo.py'), 'assert True\n');
@@ -235,6 +244,24 @@ test('passing Product Check is bound before checkpoint and review packet include
   assert(source.files.some(file => file.path === 'test_demo.py' && file.content.includes('assert True')));
   await approveCheckpoint({ ...f.options, approvedBy: 'fixture-owner' });
   assert.equal((await completeTask(f.options)).status, LIFECYCLE_STATES.COMPLETED);
+});
+
+test('verified existing UI context reaches Gemini without widening the write scope and usage reaches state', async t => {
+  const f = await fixture({ workerContext: 'Trang hiện có dùng bố cục xanh; nút đăng nhập nằm trong thẻ trung tâm.' });
+  t.after(f.cleanup);
+  const result = await runHarnessLifecycle(f.options);
+  assert.equal(result.status, LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT);
+  assert.match(f.worker.prompts[0], /Verified existing-source context/);
+  assert.match(f.worker.prompts[0], /bố cục xanh/);
+  assert.match(f.worker.prompts[0], /allowed_paths/);
+  assert.deepEqual(result.latest_execution.usage, {
+    source: 'mcp', input_tokens: 11, output_tokens: 7, reasoning_tokens: null, cached_tokens: null, total_tokens: 18
+  });
+  assert.deepEqual(result.review_result.usage, {
+    source: 'openai', input_tokens: 5, output_tokens: 3, reasoning_tokens: null, cached_tokens: null, total_tokens: 8
+  });
+  assert.equal(result.history.filter(item => item.phase === 'review').at(-1).review_prompt_metrics.prompt_bytes,
+    f.reviewerCalls[0].prompt.length ? Buffer.byteLength(f.reviewerCalls[0].prompt, 'utf8') : 0);
 });
 
 test('Product Check waits without another AI call and verifyProductCheck can finish it', async t => {
@@ -316,6 +343,34 @@ test('review source rejects missing and oversized declared context', async t => 
   await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['large.mjs'] }, changeset), /bounded regular file|exceeds 256 KiB/);
   await writeFile(path.join(root, 'binary.mjs'), Buffer.from([0xff, 0xfe, 0xfd]));
   await assert.rejects(() => buildReviewSource(root, task, { gate_paths: ['binary.mjs'] }, changeset), /valid UTF-8 text/);
+});
+
+test('review prompt omits duplicate base content but keeps current code, diff, and deleted/renamed base files', () => {
+  const packet = {
+    review_source_sha256: 'f'.repeat(64),
+    review_source: {
+      changed_paths: ['app.mjs', 'deleted.mjs'],
+      declared_context_paths: [],
+      files: [{ path: 'app.mjs', content: 'export const value = "new";\n' }],
+      base_files: [
+        { path: 'app.mjs', content: 'export const value = "old";\n' },
+        { path: 'deleted.mjs', content: 'export const removed = true;\n' }
+      ],
+      diff: '-old\n+new\n',
+      sha256: 'f'.repeat(64)
+    },
+    review_input_sha256: 'e'.repeat(64),
+    changed_files: [{ path: 'app.mjs', status: 'modified' }],
+    tests: [{ id: 'fixture', code: 0 }]
+  };
+  const { prompt, metrics } = buildReviewPrompt({ task_id: 'TASK-PROMPT', acceptance_criteria: ['value is new'] }, packet);
+  assert.match(prompt, /export const value = \\\"new\\\"/);
+  assert.match(prompt, /export const removed = true/);
+  assert.match(prompt, /-old/);
+  assert.doesNotMatch(prompt, /export const value = \\\"old\\\"/);
+  assert.deepEqual(metrics.omitted_base_paths, ['app.mjs']);
+  assert.ok(metrics.compact_source_bytes < metrics.full_source_bytes);
+  assert.equal(metrics.prompt_bytes, Buffer.byteLength(prompt, 'utf8'));
 });
 
 test('claim success and deterministic second claim rejection', async t => {
