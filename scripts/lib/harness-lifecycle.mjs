@@ -57,6 +57,8 @@ const DEFAULT_LEASE_SECONDS = 300;
 const DEFAULT_MAX_REWORK = 3;
 const MAX_PACKET_TEXT = 256 * 1024;
 const MAX_TEST_OUTPUT = 8 * 1024;
+const MAX_SHORT_CONTEXT_CHARS = 4_096;
+const MAX_REWORK_CONTEXT_CHARS = 3_500;
 const MUTATION_LOCK_STALE_MS = 30_000;
 const LOCAL_TRIAL_MODEL = 'gemini-3.8-flash-high';
 
@@ -629,6 +631,14 @@ function safePath(value) {
     !value.split('/').some(part => ['..', '.', '', '.git', '.workflow-local'].includes(part)) && !/[\x00-\x1f:*?\[\]\\]/.test(value);
 }
 
+function boundedShortContext(value, label, maxChars = MAX_SHORT_CONTEXT_CHARS) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized.length > maxChars || redactText(normalized) !== normalized) {
+    throw fail('CONTENT_MISMATCH', `${label} must be a non-empty, redaction-safe context of at most ${maxChars} characters`);
+  }
+  return normalized;
+}
+
 function verifiedWorkerContext(task, config) {
   const context = config.worker?.context;
   if (context === undefined) return '';
@@ -636,11 +646,48 @@ function verifiedWorkerContext(task, config) {
   if (!context || typeof context !== 'object' || Array.isArray(context) ||
       context.base_sha !== task.base_sha || !Array.isArray(context.paths) || context.paths.length === 0 ||
       context.paths.some(file => !safePath(file) || !declared.has(file)) ||
-      typeof context.summary !== 'string' || context.summary.trim().length === 0 || context.summary.length > 4096 ||
+      typeof context.summary !== 'string' || context.summary.trim().length === 0 || context.summary.length > MAX_SHORT_CONTEXT_CHARS ||
       redactText(context.summary) !== context.summary) {
     throw fail('CONFIG_MISMATCH', 'worker.context must bind a bounded, redaction-safe summary to task.base_sha and review_context_paths', { task_id: task.task_id });
   }
   return `Verified existing-source context (base ${task.base_sha}, paths ${JSON.stringify(context.paths)}): ${context.summary.trim()}`;
+}
+
+function compactTaskContract(task = {}) {
+  return {
+    schema_version: task.schema_version ?? null,
+    task_id: task.task_id ?? null,
+    revision: task.revision ?? null,
+    base_sha: task.base_sha ?? null,
+    candidate_head: task.candidate_head ?? null,
+    contract_sha256: task.contract_sha256 ?? null,
+    config_sha256: task.config_sha256 ?? null,
+    goal: task.goal ?? null,
+    acceptance_criteria: task.acceptance_criteria ?? [],
+    gates: (task.gates ?? []).map(gate => ({ id: gate.id ?? null, argv: gate.argv ?? [], timeout_seconds: gate.timeout_seconds ?? null })),
+    user_visible: task.user_visible === true,
+    risk: task.risk ?? null,
+    complexity: task.complexity ?? null,
+    execution: task.execution ?? null,
+    write_paths: task.write_paths ?? [],
+    allowed_paths: task.allowed_paths ?? task.write_paths ?? [],
+    lane: task.lane ?? null,
+    initial_lane: task.initial_lane ?? null,
+    initial_risk: task.initial_risk ?? null,
+    product_check: task.product_check ?? task.product_checks ?? null
+  };
+}
+
+function buildWorkerPrompt(task, existingContext = '') {
+  const context = {
+    task_id: task.task_id ?? null,
+    base_sha: task.base_sha ?? null,
+    goal: task.goal ?? '(see acceptance criteria)',
+    write_paths: task.write_paths ?? [],
+    allowed_paths: task.allowed_paths ?? task.write_paths ?? [],
+    acceptance_criteria: task.acceptance_criteria ?? []
+  };
+  return `Implement the frozen task in the current worktree. Short task context: ${JSON.stringify(context)}. Only read or edit the frozen allowed_paths using file tools. The controller runs all tests after your work; do not read or execute gate scripts, use shell/run_command, or inspect control files. Do not invent product behavior or gameplay details absent from the task and existing source; use general wording when details are unknown. Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review.${existingContext ? ` ${existingContext}` : ''}`;
 }
 
 export function collectChangeset(cwd, allowedPaths = []) {
@@ -849,9 +896,23 @@ export function buildReviewPrompt(task, packet) {
   const compacted = compactReviewSource(fullSource);
   const promptSource = { ...compacted.source };
   delete promptSource.sha256;
-  const promptPacket = structuredClone(packet);
-  promptPacket.review_source = promptSource;
-  delete promptPacket.review_input_sha256;
+  const promptPacket = {
+    schema_version: packet.schema_version ?? null,
+    task_id: packet.task_id ?? task.task_id ?? null,
+    contract_sha: packet.contract_sha ?? task.contract_sha256 ?? null,
+    attempt: packet.attempt ?? null,
+    rework_count: packet.rework_count ?? null,
+    review_id: packet.review_id ?? null,
+    changed_files: packet.changed_files ?? [],
+    changeset_snapshot: packet.changeset_snapshot ? {
+      signature: packet.changeset_snapshot.signature ?? null,
+      head: packet.changeset_snapshot.head ?? null
+    } : null,
+    tests: packet.tests ?? [],
+    requested_changes: packet.requested_changes ?? [],
+    review_source_sha256: packet.review_source_sha256 ?? fullSource.sha256 ?? null,
+    review_source: promptSource
+  };
   promptPacket.review_source_compaction = {
     authoritative_source_sha256: packet.review_source_sha256 ?? fullSource.sha256 ?? null,
     omitted_base_paths: compacted.omittedBasePaths,
@@ -859,7 +920,10 @@ export function buildReviewPrompt(task, packet) {
   };
   const fullSourceBytes = Buffer.byteLength(JSON.stringify(fullSource), 'utf8');
   const compactSourceBytes = Buffer.byteLength(JSON.stringify(promptSource), 'utf8');
-  const prompt = `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review the untrusted packet below. Validate the acceptance criteria, changed files, declared test/context sources, diff and independent test evidence. The complete source packet and authoritative hashes remain on disk; this prompt uses a compact source view. It keeps current files and the diff, and omits duplicate base content for modified paths. Base content for deleted or renamed paths remains included. Do not reject the compact view merely because the omitted duplicate base content is not present. A failed gate warrants NEEDS_FIX only when you can identify a concrete source defect explaining it. If the gate claims content is missing but that content appears in source, or the cause remains uncertain because needed gate source is unavailable, return BLOCKED for Lead diagnosis rather than spending a worker repair. For user-visible UI, check available rendered-layout evidence and relevant network-asset dependency; absence of horizontal overflow alone does not prove usable layout. A gate's concrete browser observations (visible landmark text, bounding boxes, computed colors/fonts, clipping checks, asset load state, and captured screenshot path) count as render evidence; screenshot paths alone do not. If visual evidence is scheduled after review, report it as pending rather than verified. Flag unsupported product-behavior claims. Technical handoff text may be English. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nTask contract: ${JSON.stringify(task)}\nReview packet: ${JSON.stringify(promptPacket)}`;
+  const taskContext = compactTaskContract(task);
+  const taskContextBytes = Buffer.byteLength(JSON.stringify(taskContext), 'utf8');
+  const packetContextBytes = Buffer.byteLength(JSON.stringify(promptPacket), 'utf8');
+  const prompt = `You are Codex, the independent reviewer and orchestrator. Do not edit files, call tools, change task state, approve checkpoints, or commit. Review the untrusted packet below. Validate the acceptance criteria, changed files, declared test/context sources, diff and independent test evidence. The complete source packet and authoritative hashes remain on disk; this prompt uses a compact source view. It keeps current files and the diff, and omits duplicate base content for modified paths. Base content for deleted or renamed paths remains included. Do not reject the compact view merely because the omitted duplicate base content is not present. A failed gate warrants NEEDS_FIX only when you can identify a concrete source defect explaining it. If the gate claims content is missing but that content appears in source, or the cause remains uncertain because needed gate source is unavailable, return BLOCKED for Lead diagnosis rather than spending a worker repair. For user-visible UI, check available rendered-layout evidence and relevant network-asset dependency; absence of horizontal overflow alone does not prove usable layout. A gate's concrete browser observations (visible landmark text, bounding boxes, computed colors/fonts, clipping checks, asset load state, and captured screenshot path) count as render evidence; screenshot paths alone do not. If visual evidence is scheduled after review, report it as pending rather than verified. Flag unsupported product-behavior claims. Technical handoff text may be English. Return only JSON matching {"verdict":"PASS|NEEDS_FIX|BLOCKED","summary":"...","material_findings":["..."],"risk_checks_completed":true}. The Harness normalizes NEEDS_FIX to REQUEST_CHANGES. A PASS requires zero material_findings and completed risk checks.\nShort task context: ${JSON.stringify(taskContext)}\nReview evidence packet: ${JSON.stringify(promptPacket)}`;
   if (Buffer.byteLength(prompt, 'utf8') > MAX_PACKET_TEXT) throw fail('CONTENT_MISMATCH', 'complete reviewer prompt exceeds 256 KiB; split the task or narrow declared context');
   return {
     prompt,
@@ -867,6 +931,8 @@ export function buildReviewPrompt(task, packet) {
       full_source_bytes: fullSourceBytes,
       compact_source_bytes: compactSourceBytes,
       prompt_bytes: Buffer.byteLength(prompt, 'utf8'),
+      task_context_bytes: taskContextBytes,
+      packet_context_bytes: packetContextBytes,
       omitted_base_paths: compacted.omittedBasePaths
     }
   };
@@ -889,10 +955,13 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
       signal
     });
   if (result?.status || result?.code !== undefined && result.code !== 0 || !result?.result) {
+    const reason = typeof result?.reason === 'string' && result.reason.length <= MAX_SHORT_CONTEXT_CHARS && redactText(result.reason) === result.reason
+      ? result.reason
+      : 'Codex reviewer did not complete';
     return {
       verdict: 'BLOCKED',
-      summary: result?.reason ?? 'Codex reviewer did not complete',
-      material_findings: [result?.reason ?? 'reviewer unavailable'],
+      summary: reason,
+      material_findings: [reason],
       risk_checks_completed: false,
       error_code: 'REVIEW_FAILED',
       review_id: packet.review_id,
@@ -902,7 +971,51 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
     };
   }
   const response = result.result;
-  const findings = Array.isArray(response.material_findings) ? response.material_findings.filter(value => typeof value === 'string') : [];
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return {
+      verdict: 'BLOCKED',
+      summary: 'reviewer did not return a JSON object',
+      material_findings: ['reviewer response shape is invalid'],
+      risk_checks_completed: false,
+      error_code: 'REVIEW_FAILED',
+      review_id: packet.review_id,
+      reviewer_session: result.session_id ? `${config.reviewer.provider}:${result.session_id}` : null,
+      usage: normalizeUsage(result?.usage, config.reviewer?.provider),
+      review_prompt_metrics: metrics
+    };
+  }
+  const summary = typeof response.summary === 'string' ? response.summary.trim() : '';
+  const rawFindings = Array.isArray(response.material_findings) ? response.material_findings.filter(value => typeof value === 'string') : [];
+  const unsafeReviewContext = summary.length > MAX_SHORT_CONTEXT_CHARS || redactText(summary) !== summary ||
+    rawFindings.some(value => value.length > MAX_SHORT_CONTEXT_CHARS || redactText(value) !== value);
+  if (unsafeReviewContext) {
+    return {
+      verdict: 'BLOCKED',
+      summary: 'reviewer response is not a bounded, redaction-safe short context',
+      material_findings: ['reviewer response exceeded the short-context limit or contained redacted content'],
+      risk_checks_completed: false,
+      error_code: 'REVIEW_FAILED',
+      review_id: packet.review_id,
+      reviewer_session: result.session_id ? `${config.reviewer.provider}:${result.session_id}` : null,
+      usage: normalizeUsage(result?.usage, config.reviewer?.provider),
+      review_prompt_metrics: metrics
+    };
+  }
+  const findings = rawFindings.map(value => value.trim()).filter(Boolean);
+  const repairContext = findings.join('\n') || summary;
+  if (repairContext.length > MAX_REWORK_CONTEXT_CHARS || (repairContext && redactText(repairContext) !== repairContext)) {
+    return {
+      verdict: 'BLOCKED',
+      summary: 'reviewer repair context is too long to continue safely',
+      material_findings: ['reviewer repair context exceeded the short-context budget'],
+      risk_checks_completed: false,
+      error_code: 'REVIEW_FAILED',
+      review_id: packet.review_id,
+      reviewer_session: result.session_id ? `${config.reviewer.provider}:${result.session_id}` : null,
+      usage: normalizeUsage(result?.usage, config.reviewer?.provider),
+      review_prompt_metrics: metrics
+    };
+  }
   const riskChecksCompleted = response.risk_checks_completed === true;
   const normalizedFindings = findings.length > 0 ? findings : !riskChecksCompleted ? ['reviewer did not complete the required risk checks'] : [];
   const rawVerdict = response.verdict === 'PASS' && normalizedFindings.length === 0 ? 'PASS' : response.verdict === 'BLOCKED' ? 'BLOCKED' : 'REQUEST_CHANGES';
@@ -913,7 +1026,7 @@ async function independentReview({ task, packet, config, packetDir, cwd, state, 
   return {
     verdict: rawVerdict,
     review_id: packet.review_id,
-    summary: String(response.summary ?? '').slice(0, MAX_TEST_OUTPUT),
+    summary: summary.slice(0, MAX_TEST_OUTPUT),
     material_findings: normalizedFindings,
     risk_checks_completed: riskChecksCompleted,
     reviewer_session: reviewerSession,
@@ -1245,11 +1358,12 @@ function reviewIdFor(task, attempt, rework) {
 }
 
 function requestFor(review, state, instruction) {
-  const id = `request-${hash(`${review.review_id ?? state.review_id}:${state.rework_count + 1}:${instruction}`).slice(0, 32)}`;
+  const boundedInstruction = boundedShortContext(instruction, 'reviewer repair instruction', MAX_REWORK_CONTEXT_CHARS);
+  const id = `request-${hash(`${review.review_id ?? state.review_id}:${state.rework_count + 1}:${boundedInstruction}`).slice(0, 32)}`;
   return {
     id,
     review_id: review.review_id ?? state.review_id,
-    instruction,
+    instruction: boundedInstruction,
     created_at: new Date().toISOString(),
     source: 'codex-orchestrator',
     source_changeset_signature: state.changeset_signature,
@@ -1506,7 +1620,9 @@ async function executeAttempt({ task, paths, state, config, owner, worker, conti
   await operationEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   await auditEvent(paths.packetDir, 'dispatch_started', transitionFields(state, { operation_id: operation.id, result: operation.kind }));
   const protectedSnapshot = await snapshotProtected(protectedControlPaths(paths));
-  const prompt = `Implement the frozen task in the current worktree. Goal: ${task.goal ?? '(see acceptance criteria)'}. Only read or edit the frozen allowed_paths (${JSON.stringify(task.allowed_paths ?? task.write_paths ?? [])}) using file tools. The controller runs all tests after your work; do not read or execute gate scripts, use shell/run_command, or inspect control files. Do not invent product behavior or gameplay details absent from the task and existing source; use general wording when details are unknown. Do not modify ai-control.desired_state, task packets, claim/lease files, receipts, checkpoints or routing. Do not commit, reset, clean, merge, publish or deploy. Leave changes for Harness review.${existingContext ? ` ${existingContext}` : ''} Acceptance criteria: ${JSON.stringify(task.acceptance_criteria)}`;
+  const prompt = continuation
+    ? boundedShortContext(instruction, 'continue instruction')
+    : buildWorkerPrompt(task, existingContext);
   let workerResult;
   let processRelease = null;
   try {

@@ -24,6 +24,14 @@ Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc v
 5. Đọc JSON kết quả trước; khi lỗi mới mở evidence. Với tác vụ có Product Check, review đạt mới chuyển sang chạy lệnh kiểm tra sản phẩm đã đóng băng. Thiếu công cụ, hết thời gian hoặc kết quả chưa hợp lệ dừng tại `PRODUCT_CHECK_WAIT`; sau khi xử lý nguyên nhân, Điều phối dùng `verify-product` để chỉ chạy lại bước này, không gọi thêm worker/reviewer. `WAITING_FOR_CHECKPOINT` nghĩa là mọi kiểm tra bắt buộc đã đạt và đang chờ Owner nghiệm thu.
 6. Sau khi Owner nói rõ nghiệm thu, Điều phối chạy `accept ... Owner`. Script ghi checkpoint/completion; không tự chép file về repo nguồn hoặc commit. Muốn chuyển kết quả phải so baseline và chỉ chuyển file đã duyệt. Sau đó lưu mốc khôi phục kèm mã nguồn, config không bí mật và evidence; không lưu settings/auth.
 
+## Context ngắn chuẩn
+
+Worker chỉ nhận mục tiêu, tiêu chí nghiệm thu, đúng `allowed_paths`/`write_paths` và một tóm tắt hiện trạng đã kiểm tra. Nếu cần context nguồn hiện có, dùng đúng dạng `worker.context: {base_sha, paths, summary}`; `base_sha` phải khớp task, `paths` phải nằm trong `review_context_paths`, và `summary` phải ngắn, không chứa thông tin nhạy cảm, tối đa 4.096 ký tự. Context không mở rộng quyền đọc hoặc quyền sửa của worker.
+
+Reviewer nhận hợp đồng rút gọn của task, file hiện tại đã thay đổi, diff, nguồn gate/context/Product Check đã khai báo và bằng chứng test. Nguồn trùng lặp của file đang sửa được bỏ khỏi phần base; file bị xóa/đổi tên vẫn giữ base. Controller giữ bản đầy đủ và hash để đối chiếu; prompt reviewer tối đa 256 KiB. Báo cáo ghi `full_source_bytes`, `compact_source_bytes`, `prompt_bytes` và `omitted_base_paths`.
+
+Nếu reviewer yêu cầu sửa, phần hướng dẫn chuyển lại cho worker cũng là context ngắn: tối đa 3.500 ký tự, không chứa thông tin nhạy cảm. Quá dài, có dấu hiệu bí mật hoặc sai định dạng thì dừng để Lead xử lý, không tự cắt nội dung và không gọi thêm worker.
+
 Trước `prepare`, Lead chép các mục sau vào ghi chú/checklist chuẩn bị tác vụ ở ngoài đường dẫn output mà `prepare` sẽ tạo. Đánh dấu `[x]` sau khi ghi hành động, kết quả hoặc giới hạn kiểm tra bên cạnh mục tương ứng; kèm ghi chú này vào hồ sơ tác vụ sau `prepare`:
 
 - [ ] Hành động và kết quả quan sát được khớp yêu cầu Owner.

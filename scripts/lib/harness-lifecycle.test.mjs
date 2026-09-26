@@ -38,7 +38,7 @@ import {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 let serial = 0;
 
-async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], temporaryPermissions = false, bindConfig = temporaryPermissions, productCheck = false, workerContext = null } = {}) {
+async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], reviewerResult = null, temporaryPermissions = false, bindConfig = temporaryPermissions, productCheck = false, workerContext = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'qq-harness-lifecycle-'));
   const productModePath = path.join(root, 'product-mode.txt');
   const productRunnerPath = path.join(root, 'product-runner.mjs');
@@ -150,7 +150,7 @@ async function fixture({ maxRework = 3, reviewerVerdicts = ['PASS', 'PASS'], tem
       session_id: `codex-review-${reviewerCalls.length}`,
       observed_models: ['gpt-5.6-terra'],
       usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 },
-      result: {
+      result: reviewerResult ?? {
         verdict,
         summary: verdict === 'PASS' ? 'fixture review passed' : 'fixture review requests changes',
         material_findings: verdict === 'PASS' ? [] : ['requested fixture change'],
@@ -253,6 +253,7 @@ test('verified existing UI context reaches Gemini without widening the write sco
   assert.equal(result.status, LIFECYCLE_STATES.WAITING_FOR_CHECKPOINT);
   assert.match(f.worker.prompts[0], /Verified existing-source context/);
   assert.match(f.worker.prompts[0], /bố cục xanh/);
+  assert.match(f.worker.prompts[0], /Short task context/);
   assert.match(f.worker.prompts[0], /allowed_paths/);
   assert.deepEqual(result.latest_execution.usage, {
     source: 'mcp', input_tokens: 11, output_tokens: 7, reasoning_tokens: null, cached_tokens: null, total_tokens: 18
@@ -262,6 +263,23 @@ test('verified existing UI context reaches Gemini without widening the write sco
   });
   assert.equal(result.history.filter(item => item.phase === 'review').at(-1).review_prompt_metrics.prompt_bytes,
     f.reviewerCalls[0].prompt.length ? Buffer.byteLength(f.reviewerCalls[0].prompt, 'utf8') : 0);
+  assert.ok(result.history.filter(item => item.phase === 'review').at(-1).review_prompt_metrics.task_context_bytes > 0);
+});
+
+test('reviewer repair context is bounded and redaction-safe before another worker call', async t => {
+  const tooLong = await fixture({ reviewerResult: { verdict: 'NEEDS_FIX', summary: 'needs change', material_findings: ['x'.repeat(3501)], risk_checks_completed: true } });
+  t.after(tooLong.cleanup);
+  const blocked = await runHarnessLifecycle(tooLong.options);
+  assert.equal(blocked.status, LIFECYCLE_STATES.BLOCKED);
+  assert.equal(tooLong.worker.calls.length, 1);
+  assert.match(blocked.review_result.summary, /too long|bounded|redaction-safe/);
+
+  const secret = await fixture({ reviewerResult: { verdict: 'NEEDS_FIX', summary: 'needs change', material_findings: ['token=fixture-secret-value'], risk_checks_completed: true } });
+  t.after(secret.cleanup);
+  const secretBlocked = await runHarnessLifecycle(secret.options);
+  assert.equal(secretBlocked.status, LIFECYCLE_STATES.BLOCKED);
+  assert.equal(secret.worker.calls.length, 1);
+  assert.doesNotMatch(JSON.stringify(secretBlocked.review_result), /fixture-secret-value/);
 });
 
 test('Product Check waits without another AI call and verifyProductCheck can finish it', async t => {
@@ -678,6 +696,17 @@ test('REQUEST_CHANGES increments rework_count and continue reuses conversation',
   assert.equal(continued.conversation_id, 'agy-conversation-1');
   assert.deepEqual(f.worker.calls.map(call => call.tool), ['antigravity_execute', 'antigravity_continue']);
   assert.equal(continued.attempt, 2);
+});
+
+test('REQUEST_CHANGES rejects oversized repair context before dispatch', async t => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  await runHarnessLifecycle(f.options);
+  await assert.rejects(
+    () => requestChanges({ ...f.options, instruction: 'x'.repeat(3501) }),
+    error => error.code === 'CONTENT_MISMATCH'
+  );
+  assert.equal(f.worker.calls.length, 1);
 });
 
 test('duplicate REQUEST_CHANGES is idempotent and conflicting replay is rejected', async t => {
