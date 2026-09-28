@@ -1,13 +1,38 @@
 # Gọi Gemini trực tiếp
 
-Điều phối chuẩn bị yêu cầu rồi chạy script; không mở Luna chỉ để chạy lệnh. Worker dùng Gemini 3.8 Flash High qua MCP Antigravity đã đăng nhập để thực hiện (Gemini implement), controller tự chạy kiểm tra/gate (controller tests), reviewer độc lập bắt buộc là OpenAI Codex model `gpt-6-luna` ở reasoning effort `max` (Luna Max independent review), sau đó dừng tại checkpoint chờ Owner nghiệm thu (Owner acceptance). Luna chỉ làm reviewer độc lập, tuyệt đối không làm worker hay runner. Không cài thêm dịch vụ hoặc thư viện. Task Direct đã khóa với Luna 5.6 tiếp tục theo cấu hình cũ.
+Điều phối chuẩn bị yêu cầu rồi chạy script; không mở Luna chỉ để chạy lệnh. Worker dùng Gemini 3.8 Flash High qua MCP Antigravity đã đăng nhập để thực hiện (Gemini implement), controller tự chạy kiểm tra/gate (controller tests), reviewer độc lập bắt buộc là OpenAI Codex model `gpt-6-luna` ở reasoning effort `max` (Luna Max independent review), sau đó dừng tại checkpoint chờ Owner nghiệm thu (Owner acceptance). Luna chỉ làm reviewer độc lập, tuyệt đối không làm worker hay runner. Không cài thêm dịch vụ hoặc thư viện ngoài các dependency đã ghim trong `requirements.txt`. Task Direct đã khóa với Luna 5.6 tiếp tục theo cấu hình cũ.
+
+## Môi trường Python bắt buộc
+
+Worker MCP dùng `mcp==2.2.0`. Không dùng MCP trong Python dùng chung của máy vì ứng dụng khác có thể cần phiên bản khác. Đứng tại thư mục gốc project và chạy một lần:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -c "from mcp import Client; from mcp.server.mcpserver import MCPServer; print('MCP 2.2.0 OK')"
+.\.venv\Scripts\Activate.ps1
+```
+
+Giữ cửa sổ PowerShell đã kích hoạt `.venv` trong suốt thời gian chạy `prepare`, `check`, `run` và các gate gọi worker. Nếu PowerShell không cho phép lệnh kích hoạt, dùng môi trường trong cửa sổ hiện tại bằng lệnh sau rồi chạy tiếp:
+
+```powershell
+$env:Path = (Resolve-Path ".venv\Scripts").Path + ";" + $env:Path
+```
+
+Lệnh kiểm tra nhanh trước khi chạy Direct:
+
+```powershell
+python -c "from mcp import Client; from mcp.server.mcpserver import MCPServer; print('MCP 2.2.0 OK')"
+```
+
+Nếu lệnh này lỗi, dừng tại bước chuẩn bị môi trường; không đổi import trong `mcp/antigravity_server.py` và không cài đè MCP trong Python dùng chung.
 
 ## Quy trình
 
 Trước dispatch, Lead đối chiếu đầy đủ nguồn review, bộ lọc và kích thước prompt. Nếu Direct đã biết không phù hợp, xem ngoại lệ ASSISTED tại [canonical](V10_CANONICAL_SPEC.md#current-entry-and-owner-workflow). Lead ghi lý do và thông báo; Owner không phải chọn cách chạy. Không dùng ngoại lệ để chạy lại Direct đã thất bại, vượt ngân sách hoặc chưa rõ kết quả.
 
 1. Dùng task `qq.workflow.task.v10.1` và config `qq.bridge.v2` hiện có; chốt repo chính, base SHA, mục tiêu, tiêu chí, exact `allowed_paths`/`write_paths` và gates. Owner chỉ cần mô tả công việc. Điều phối soạn JSON.
-2. Bắt đầu từ [mẫu cấu hình Direct](BRIDGE_CONFIG.direct.example.json). Thay `write_paths` bằng đúng các file được giao, `gate_paths` bằng file bảo vệ cho các lệnh kiểm tra, và `local_trial_root` bằng thư mục tuyệt đối bên ngoài repo và packet. Với việc giao diện mới, thêm `product_check.command` và `preflight` như đoạn dưới. Hai thư mục mẫu có nội dung tối thiểu: một kết quả đúng, một kết quả sai có thể xảy ra; script gate nằm trong repo và dùng đường dẫn tương đối trong lệnh. `good_target_url` phải đúng URL mà script Product Check trả về khi đứng tại thư mục mẫu đúng. `prepare` tự chạy phép kiểm tra trên cả hai mẫu và xác nhận đủ định dạng Product Check **trước khi tạo packet**, không gọi AI. `check` và `run` thử lại trước dispatch; nếu mẫu sai, sửa phần chuẩn bị rồi mới chạy. Task đã prepare từ trước không bị ép thêm bước này. Nếu Gemini cần biết giao diện hiện có trước khi sửa, sau khi kiểm tra các file đó, thêm `review_context_paths` và một `worker.context` ngắn gồm `base_sha`, `paths` (phải nằm trong `review_context_paths`) và `summary`; phần tóm tắt này chỉ được chèn vào yêu cầu Gemini, còn `write_paths`/`allowed_paths` vẫn là giới hạn sửa. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[python,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-6-luna`, `effort:max`. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
+2. Bắt đầu từ [mẫu cấu hình Direct](BRIDGE_CONFIG.direct.example.json). Thay `write_paths` bằng đúng các file được giao, `gate_paths` bằng file bảo vệ cho các lệnh kiểm tra, và `local_trial_root` bằng thư mục tuyệt đối bên ngoài repo và packet. Với việc giao diện mới, thêm `product_check.command` và `preflight` như đoạn dưới. Hai thư mục mẫu có nội dung tối thiểu: một kết quả đúng, một kết quả sai có thể xảy ra; script gate nằm trong repo và dùng đường dẫn tương đối trong lệnh. `good_target_url` phải đúng URL mà script Product Check trả về khi đứng tại thư mục mẫu đúng. `prepare` tự chạy phép kiểm tra trên cả hai mẫu và xác nhận đủ định dạng Product Check **trước khi tạo packet**, không gọi AI. `check` và `run` thử lại trước dispatch; nếu mẫu sai, sửa phần chuẩn bị rồi mới chạy. Task đã prepare từ trước không bị ép thêm bước này. Nếu Gemini cần biết giao diện hiện có trước khi sửa, sau khi kiểm tra các file đó, thêm `review_context_paths` và một `worker.context` ngắn gồm `base_sha`, `paths` (phải nằm trong `review_context_paths`) và `summary`; phần tóm tắt này chỉ được chèn vào yêu cầu Gemini, còn `write_paths`/`allowed_paths` vẫn là giới hạn sửa. Config worker: `transport:mcp`, `server:antigravity_worker`, `provider:mcp`, `command:[C:/project/.venv/Scripts/python.exe,mcp/antigravity_server.py]`, `model:gemini-3.8-flash-high`, `local_trial:true`, `local_trial_root` là thư mục tuyệt đối nằm ngoài repo/packet, `skip_permissions:false`. Thay `C:/project` bằng đường dẫn thật của project trước khi `prepare`; phần tử thứ hai vẫn là `mcp/antigravity_server.py`. Reviewer: `provider:openai`, `cli:codex`, `command:[codex]`, `model:gpt-6-luna`, `effort:max`. Billing `SUBSCRIPTION_ONLY`; không chấp nhận `fallback_reviewer`.
 
 ```json
 {
