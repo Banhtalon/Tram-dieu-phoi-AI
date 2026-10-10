@@ -297,6 +297,7 @@ export async function statusDirect(manifestPath) {
 export async function verifyProductDirect(manifestPath, signal, api = lifecycle) {
   const { manifest: m, config } = await checkDirect(manifestPath, { allowExisting: true });
   const state = await json(path.join(m.packetDir, 'state.json'));
+  requireValue(!contradictoryGate(state.tests), 'GATE_REPORTED_FAILURE');
   requireValue(state.status === 'PRODUCT_CHECK_WAIT', 'PRODUCT_CHECK_NOT_WAITING');
   const claim = await api.claimTask(m.taskPath, { owner: state.owner, leaseSeconds: 300 });
   requireValue(['CLAIMED', 'ALREADY_CLAIMED'].includes(claim.status), 'CLAIM_FAILED');
