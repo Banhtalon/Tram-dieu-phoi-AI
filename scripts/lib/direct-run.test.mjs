@@ -63,6 +63,12 @@ test('Direct status and completed accept explain ownership without claiming inte
   const blockedAfterWorker = await statusDirect(manifestPath);
   assert.equal(blockedAfterWorker.attempts, 2);
   assert.equal(blockedAfterWorker.repairs, 1);
+  await writeFile(path.join(root, 'state.json'), JSON.stringify({ status: 'COMPLETED', task_id: task.task_id,
+    tests: [{ id: 'false-positive', code: 0, stdout: '{"status":"FAIL"}', timed_out: false, interrupted: false }] }));
+  const contradictory = await statusDirect(manifestPath);
+  assert.equal(contradictory.status, 'BLOCKED');
+  assert.match(contradictory.owner_message, /Gate báo kết quả không đạt/);
+  await assert.rejects(acceptDirect(manifestPath, 'fixture-owner'), /GATE_REPORTED_FAILURE/);
 });
 
 test('one process, at most three repairs for new tasks and one for frozen legacy tasks', async () => {
