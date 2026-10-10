@@ -13,6 +13,7 @@ import { assertWorkerIsolation } from './implementation-worker.mjs';
 import { auditSummary } from './harness-observability.mjs';
 import { runRedacted } from './redact.mjs';
 import { aggregateInvocations } from './report.mjs';
+import { gatePassed, reportedGateStatus, contradictoryGate } from './gate-result.mjs';
 
 const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
 const json = async file => JSON.parse((await readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
@@ -59,7 +60,6 @@ const requireDirectReviewer = (config, { allowLegacy = false } = {}) => {
 };
 
 const fixtureCommand = (repo, argv) => argv.map((arg, index) => index > 0 && !path.isAbsolute(arg) && /\.(?:[cm]?js|py|ps1|sh)$/i.test(arg) && existsSync(path.join(repo, arg)) ? path.join(repo, arg) : arg);
-const reportedStatus = stdout => { try { return JSON.parse(stdout.trim()).status; } catch { return null; } };
 
 async function qualifyPreparation(repo, task, config, { required = false } = {}) {
   const probe = config.preflight;
@@ -74,12 +74,10 @@ async function qualifyPreparation(repo, task, config, { required = false } = {})
   for (const gate of task.gates) {
     const argv = fixtureCommand(repo, gate.argv);
     const positive = await runRedacted(argv, { cwd: probe.good_cwd, timeoutSeconds: gate.timeout_seconds });
-    const positiveStatus = reportedStatus(positive.stdout);
-    requireValue(positive.code === 0 && !positive.timed_out && !positive.interrupted &&
-      (positiveStatus === null || positiveStatus === 'PASS'), 'PREFLIGHT_GOOD_GATE_FAILED');
+    requireValue(gatePassed(positive), 'PREFLIGHT_GOOD_GATE_FAILED');
     const negative = await runRedacted(argv, { cwd: probe.bad_cwd, timeoutSeconds: gate.timeout_seconds });
     requireValue(!negative.timed_out && !negative.interrupted, 'PREFLIGHT_BAD_GATE_INVALID');
-    wrongFixtureRejected ||= negative.code !== 0 && reportedStatus(negative.stdout) !== 'PASS';
+    wrongFixtureRejected ||= !gatePassed(negative);
   }
   requireValue(wrongFixtureRejected, 'PREFLIGHT_BAD_GATE_PASSED');
   const command = config.product_check?.command;
@@ -194,7 +192,9 @@ export async function runDirect(manifestPath, signal) {
   let prepared, rulesBefore;
   let report = { schema_version: 'qq.direct-run.v1', run_id: runId, mode: 'live', status: 'BLOCKED', phase: 'preflight', provider_invocations: 0 };
   try {
-    prepared = await checkDirect(manifestPath);
+    const preflightStarted = Date.now();
+    try { prepared = await checkDirect(manifestPath); }
+    finally { report.preflight_duration_ms = Date.now() - preflightStarted; }
     const { manifest: m, config, task } = prepared;
     const settingsBefore = await json(config.worker.temporary_permissions.settingsPath);
     rulesBefore = JSON.stringify(settingsBefore.permissions ?? {});
@@ -202,7 +202,10 @@ export async function runDirect(manifestPath, signal) {
     await writeNew(path.join(output, 'dispatch.json'), { run_id: runId, task_id: task.task_id });
     report = { ...report, task_id: task.task_id, phase: 'lifecycle', provider_invocations: 'unknown',
       source_head: git(sourceRoot, 'rev-parse', 'HEAD'), config_sha256: task.config_sha256, packet_dir: m.packetDir };
-    const state = await runBounded({ taskPath: m.taskPath, config, packetDir: m.packetDir, owner: `direct-${task.task_id}`, signal });
+    const lifecycleStarted = Date.now();
+    let state;
+    try { state = await runBounded({ taskPath: m.taskPath, config, packetDir: m.packetDir, owner: `direct-${task.task_id}`, signal }); }
+    finally { report.lifecycle_duration_ms = Date.now() - lifecycleStarted; }
     report.status = state.status; report.phase = state.phase;
     if (state.error) report.error_code = errorCode(state.error);
   } catch (error) {
@@ -230,7 +233,14 @@ export async function runDirect(manifestPath, signal) {
             : [];
           report.review_prompt_metrics = reviewMetrics.length > 0 ? reviewMetrics : (saved.review_result?.review_prompt_metrics ? [saved.review_result.review_prompt_metrics] : []);
           report.changed_files = saved.changed_files?.map(file => file.path) ?? [];
-          report.gates = saved.tests?.map(test => ({ id: test.id, code: test.code, timed_out: test.timed_out })) ?? [];
+          report.gates = saved.tests?.map(test => ({ id: test.id, code: test.code, timed_out: test.timed_out,
+            reported_status: reportedGateStatus(test.stdout), duration_ms: test.duration_ms ?? null })) ?? [];
+          const contradiction = contradictoryGate(saved.tests);
+          if (contradiction && ['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(saved.status)) {
+            report.status = 'BLOCKED';
+            report.error_code = 'GATE_REPORTED_FAILURE';
+            report.blocked_gate = contradiction.id ?? null;
+          }
           const audit = await auditSummary(m.packetDir);
           report.worker_dispatches = audit.invalid_lines ? null : audit.operations.dispatch_started ?? 0;
           const reviews = (await readdir(m.packetDir)).filter(name => name.startsWith('review-'));
@@ -260,6 +270,8 @@ export async function runDirect(manifestPath, signal) {
 export async function statusDirect(manifestPath) {
   const m = await json(manifestPath);
   const state = await json(path.join(m.packetDir, 'state.json'));
+  const contradiction = contradictoryGate(state.tests);
+  const suspiciousPass = contradiction && ['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(state.status);
   const owner_message = {
     WAITING_FOR_CHECKPOINT: 'Đã đạt các kiểm tra bắt buộc; chờ Owner nghiệm thu.',
     CHECKPOINTED: 'Đã ghi nhận nghiệm thu; Lead tiếp tục bước kết thúc.',
@@ -275,7 +287,9 @@ export async function statusDirect(manifestPath) {
     LEASE_EXPIRED: 'Quyền giữ tác vụ đã hết hạn; Lead đối soát trước khi tiếp tục.'
   }[state.status] ?? 'Chưa xác nhận hoàn tất; Lead kiểm tra hồ sơ và xử lý bước tiếp theo.';
   const reason = /^[A-Z][A-Z0-9_]{0,63}$/.test(state.error?.code ?? '') ? ` Mã nguyên nhân: ${state.error.code}.` : '';
-  return { status: state.status, owner_message: owner_message + reason, task_id: state.task_id, attempts: completedAttempts(state),
+  return { status: suspiciousPass ? 'BLOCKED' : state.status,
+    owner_message: suspiciousPass ? 'Gate báo kết quả không đạt dù tiến trình trả mã 0. Cần kiểm tra gate trước nghiệm thu; không chạy lại AI khi kết quả chưa rõ.' : owner_message + reason,
+    task_id: state.task_id, attempts: completedAttempts(state),
     repairs: completedRepairs(state), change_requests: state.rework_count ?? null,
     review: state.review_result?.verdict ?? null, product_check: state.product_check?.status ?? (state.product_check === null ? 'NOT_APPLICABLE' : null), approved: state.checkpoint?.approved === true };
 }
@@ -297,6 +311,7 @@ export async function acceptDirect(manifestPath, approvedBy) {
   await assertControlledContract(m.taskPath, task);
   requireValue(controlledConfigHash(config) === task.config_sha256, 'CONFIG_MISMATCH');
   const state = await json(path.join(m.packetDir, 'state.json'));
+  requireValue(!contradictoryGate(state.tests), 'GATE_REPORTED_FAILURE');
   requireValue(['WAITING_FOR_CHECKPOINT', 'CHECKPOINTED', 'COMPLETED'].includes(state.status), 'CHECKPOINT_NOT_READY');
   if (state.status !== 'COMPLETED') requireValue(state.product_check === null || state.product_check?.status === 'PASS', 'PRODUCT_CHECK_REQUIRED');
   if (state.status !== 'COMPLETED') {
