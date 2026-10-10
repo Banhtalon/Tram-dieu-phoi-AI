@@ -245,7 +245,7 @@ import {pathToFileURL} from 'node:url'; import path from 'node:path';
 const ok=readFileSync('page.html','utf8').trim()==='good';
 const item=(id,kind)=>({[kind+'_id']:id,status:'PASS',observed_result:'observed',...(existsSync('omit-evidence')?{}:{evidence:'local fixture'})});
 process.stdout.write(JSON.stringify({schema_version:'qq.workflow.product-check-result.v1',status:ok?'PASS':'FAIL',target_url:pathToFileURL(path.resolve('page.html')).href,criterion_results:[item('page','criterion')],action_results:[item('open','action')]}));
-if(!ok)process.exitCode=1;`);
+// Intentionally exit zero even on FAIL: controller must read the structured status.`);
   git('add', '.'); git('commit', '-m', 'fixture');
   await writeFile(path.join(good, 'page.html'), 'good\n');
   await writeFile(path.join(bad, 'page.html'), 'bad\n');
