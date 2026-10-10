@@ -116,6 +116,8 @@ test('real preparation/layout + lifecycle fake boundary, missing helper and paus
   await assert.rejects(checkDirect(manifest), /HELPER_CHANGED/);
   const fail = await runDirect(manifest);
   assert.equal(fail.status, 'BLOCKED'); assert.equal(fail.provider_invocations, 0); assert.equal(fail.error_code, 'HELPER_CHANGED');
+  assert.equal(Number.isInteger(fail.preflight_duration_ms), true);
+  assert.equal(fail.preflight_duration_ms >= 0 && fail.preflight_duration_ms <= fail.duration_ms, true);
   await writeFile(helper, originalHelper);
   // Separate fake frozen task: never write or read real account settings in this test.
   const settings = path.join(root, 'settings.json');
